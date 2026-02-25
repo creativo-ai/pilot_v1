@@ -1,13 +1,59 @@
 from anthropic import Anthropic
+from google import genai
+from google.genai import types
 import os
 import json
 
+
+# ── Claude ────────────────────────────────────────────────────────────────────
 
 def get_claude_client():
     return Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 
-def classify_intent(client, user_input: str, conversation_history: list, available_actions: dict, user_id: str = "", brand_id: str = ""):
+# ── Gemini ────────────────────────────────────────────────────────────────────
+
+def get_gemini_client() -> genai.Client:
+    return genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+
+def gemini_generate(prompt: str, system: str = None) -> str:
+    """
+    Single-turn Gemini 2.5 Flash call.
+    Accepts the same (prompt, system) pattern as Claude calls.
+    Always returns a plain string — no content blocks, no formatting surprises.
+    Strips markdown code fences Gemini sometimes adds around JSON.
+    """
+    client = get_gemini_client()
+
+    config = types.GenerateContentConfig(
+        system_instruction=system,
+        temperature=0.3,
+    ) if system else types.GenerateContentConfig(temperature=0.3)
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+        config=config,
+    )
+
+    text = (response.text or "").strip()
+
+    # Strip markdown code fences Gemini sometimes wraps JSON in
+    if text.startswith("```"):
+        parts = text.split("```")
+        text = parts[1] if len(parts) > 1 else text
+        if text.startswith("json"):
+            text = text[4:]
+        text = text.strip()
+
+    return text
+
+
+# ── Legacy classify_intent (used by actions_registry path) ───────────────────
+
+def classify_intent(client, user_input: str, conversation_history: list,
+                    available_actions: dict, user_id: str = "", brand_id: str = ""):
 
     actions_text = ""
     for name, meta in available_actions.items():
@@ -25,15 +71,11 @@ def classify_intent(client, user_input: str, conversation_history: list, availab
         - user_id: {user_id}
         - brand_id: {brand_id}
 
-        Use these values to fill in arguments whenever user_id or brand_id are required.
-
         Your ONLY job:
         - Select exactly ONE action from the available actions below.
-        - Extract required arguments. Use the session context above for user_id and brand_id.
+        - Extract required arguments.
         - NEVER default to "talk" if another action clearly matches the user's intent.
-        - NEVER ask questions.
-        - NEVER explain.
-        - NEVER respond conversationally.
+        - NEVER ask questions. NEVER explain. NEVER respond conversationally.
 
         Available actions:
         {actions_text}
@@ -47,9 +89,7 @@ def classify_intent(client, user_input: str, conversation_history: list, availab
         }}
         """
 
-    messages = []
-    for msg in conversation_history:
-        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages = [{"role": m["role"], "content": m["content"]} for m in conversation_history]
     messages.append({"role": "user", "content": user_input})
 
     response = client.messages.create(

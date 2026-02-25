@@ -4,7 +4,7 @@ Every agent can be an entry point and a router.
 """
 
 from abc import ABC, abstractmethod
-from llm_client import get_claude_client
+from llm_client import get_claude_client, gemini_generate
 
 
 ROUTING_PROMPT = """
@@ -22,30 +22,13 @@ class BaseAgent(ABC):
     name: str = ""
 
     def can_handle(self, user_input: str, conversation_history: list) -> bool:
-        """Uses LLM to decide if this agent should handle the message."""
-        client = get_claude_client()
-        # Single call replaces 7 can_handle() calls
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            system="Return ONLY the agent name that best fits this request: email, media_approval, media_search, brand_update, caption, docs, talk",
-            messages=[{"role": "user", "content": user_input}],
-            max_tokens=10
-        )
-        
-        
-        
-        
-        #response = client.messages.create(
-        #    model="claude-opus-4-6",
-        #    system=ROUTING_PROMPT.format(domain=self.domain),
-        #    messages=[
-        #        *[{"role": m["role"], "content": m["content"]} for m in conversation_history[-4:]],
-        #        {"role": "user", "content": user_input}
-        #    ],
-        #    max_tokens=5
-        #)
-        answer = response.content[0].text.strip().lower()
-        return answer == "yes"
+        """Uses Gemini 2.5 Flash for fast, cheap routing classification."""
+        # Returns the best-matching agent name — check if it matches self.name
+        answer = gemini_generate(
+            prompt=user_input,
+            system="Return ONLY the single agent name that best fits this request. Choose from: email, media_approval, media_search, brand_update, caption, docs, talk"
+        ).strip().lower()
+        return answer == self.name
 
     @abstractmethod
     def run(self, user_input: str, conversation_history: list, user_id: str, brand_id: str, client=None, **kwargs) -> str:

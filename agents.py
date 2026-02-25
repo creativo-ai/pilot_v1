@@ -1,4 +1,4 @@
-from llm_client import get_claude_client
+from llm_client import get_claude_client, gemini_generate
 from data_layer_vertexAI import get_brand_info, get_media_history, update_media_status, search_documentation
 import json
 from data_layer_vertexAI import update_brand_info, db as firestore_db
@@ -7,8 +7,9 @@ import datetime
 # ---------------
 # Models
 # ---------------
-MODEL_SONNET = "claude-sonnet-4-6"        # email, caption, talk
-MODEL_HAIKU = "claude-haiku-4-5-20251001"  # docs/media formatting
+MODEL_SONNET = "claude-sonnet-4-6"         # email, caption, talk
+MODEL_HAIKU = "claude-haiku-4-5-20251001"   # docs/media formatting
+# Gemini 2.5 Flash: conversational wrapper + brand field extraction (via gemini_generate)
 
 
 # ---------------
@@ -240,28 +241,9 @@ CONVERSATIONAL_SYSTEM_PROMPT="""You are a warm, conversational AI assistant.
     - Never output raw JSON."""
 
 def _conversational_response(client, user_input: str, conversation_history: list, action_result: str) -> str:
-
+    # Gemini 2.5 Flash — fast conversational wrapping
     prompt = f"User asked: {user_input}\n\nAction completed: {action_result}\n\nCommunicate this result conversationally to the user."
-    if client is None:
-        client = get_claude_client()
-
-    messages = []
-    for msg in conversation_history:
-        messages.append({"role": msg["role"], "content": msg["content"]})
-    messages.append({"role": "user", "content": user_input})
-
-    response = client.messages.create(
-        model=MODEL_HAIKU,
-        system=CONVERSATIONAL_SYSTEM_PROMPT,
-        messages=messages,
-        max_tokens=600
-    )
-
-    for block in response.content:
-        if getattr(block, "type", None) == "text":
-            return block.text.strip()
-
-    return "Sorry, I couldn't respond."
+    return gemini_generate(prompt=prompt, system=CONVERSATIONAL_SYSTEM_PROMPT)
 
 # ---------------
 # Image Agents
@@ -431,29 +413,13 @@ def brand_update_agent(
     if client is None:
         client = get_claude_client()
 
-    # Build conversation history for Claude
-    messages = [{"role": m["role"], "content": m["content"]} for m in conversation_history]
-    messages.append({"role": "user", "content": user_input})
-
-    # Call Claude Haiku for structured JSON extraction
-    response = client.messages.create(
-        model=MODEL_HAIKU,
-        system=BRAND_UPDATE_SYSTEM_PROMPT,
-        messages=messages,
-        max_tokens=500
+    # Gemini 2.5 Flash — best structured JSON extraction accuracy
+    # gemini_generate already strips code fences, returns plain string
+    history_text = "\n".join([f"{m['role']}: {m['content']}" for m in conversation_history])
+    raw = gemini_generate(
+        prompt=f"{history_text}\nuser: {user_input}",
+        system=BRAND_UPDATE_SYSTEM_PROMPT
     )
-
-    raw = ""
-    for block in response.content:
-        if getattr(block, "type", None) == "text":
-            raw += block.text
-
-    # Strip code fences if present
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-        raw = raw.strip()
 
     try:
         parsed = json.loads(raw)
