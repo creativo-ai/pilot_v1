@@ -1,0 +1,19 @@
+{
+  "brand_name": "Que Gusto",
+  "brand_tone": "Professional, warm, confident",
+  "preferred_sign_off": "Best regards",
+  "image_history": [
+    {
+      "ID": 123,
+      "date": "2025-01-10",
+      "status": "Approved",
+      "description": "Instagram promotional banner for winter campaign"
+    },
+    {
+      "ID": 234,
+      "date": "2025-02-02",
+      "status": "Approved",
+      "description": "Product showcase image for new launch"
+    }
+  ]
+}
