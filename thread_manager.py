@@ -30,8 +30,7 @@ def _doc_id(user_id: str, agent_name: str) -> str:
 def load_thread(user_id: str, agent_name: str) -> dict:
     """
     Returns the full thread document dict, or an empty default.
-    Keys: messages, summary, collected_fields, free_form_notes,
-          last_active, status, brand_id
+    Keys: messages, summary, collected_fields, last_active, status, brand_id
     """
     doc = db.collection(COLLECTION).document(_doc_id(user_id, agent_name)).get()
     if doc.exists:
@@ -43,7 +42,6 @@ def load_thread(user_id: str, agent_name: str) -> dict:
         "messages": [],
         "summary": "",
         "collected_fields": {},
-        "free_form_notes": "",
         "last_active": None,
         "status": "active",       # active | finalized
         "created_at": None,
@@ -93,21 +91,14 @@ def get_summary(user_id: str, agent_name: str) -> str:
 
 # ── Onboarding-specific fields ────────────────────────────────────────────────
 
-def update_collected_fields(user_id: str, agent_name: str,
-                             new_fields: dict, free_form: str = None) -> None:
-    """Merge new extracted fields into collected_fields. Optionally append free-form notes."""
+def update_collected_fields(user_id: str, agent_name: str, new_fields: dict) -> None:
+    """Merge new extracted fields into collected_fields."""
     doc_ref = db.collection(COLLECTION).document(_doc_id(user_id, agent_name))
     doc = doc_ref.get()
     existing = doc.to_dict() if doc.exists else {}
 
     merged_fields = {**existing.get("collected_fields", {}), **new_fields}
-    updates = {"collected_fields": merged_fields}
-
-    if free_form:
-        prev_notes = existing.get("free_form_notes", "")
-        updates["free_form_notes"] = (prev_notes + "\n" + free_form).strip()
-
-    doc_ref.update(updates)
+    doc_ref.update({"collected_fields": merged_fields})
 
 
 def get_collected_fields(user_id: str, agent_name: str) -> dict:
@@ -172,3 +163,4 @@ def get_last_active_agent(user_id: str) -> str | None:
             latest_agent = data.get("agent_name")
 
     return latest_agent
+

@@ -114,140 +114,48 @@ def search_documentation(query: str, top_k: int = 3) -> list:
 # BRAND BOOK SEARCH
 # -------------------------------------------------
 
-def get_latest_brand_version(brand_id: str) -> str:
-    """Get the latest synced version tag for a brand's book."""
-    docs = (
-        db.collection("brand_book")
-        .where(filter=FieldFilter("brand_id", "==", brand_id))
-        .stream()
-    )
-    versions = []
-    for doc in docs:
-        v = doc.to_dict().get("version", "v1")
-        try:
-            versions.append(int(v.replace("v", "")))
-        except Exception:
-            versions.append(1)
-    return f"v{max(versions)}" if versions else "v1"
 
+# -------------------------------------------------
+# BRAND BOOK SEARCH (Firestore structured data)
+# -------------------------------------------------
 
-def search_brand_book(brand_id: str, query: str, top_k: int = 3) -> list:
-    query_embedding = embed_text(query)
-    latest_version = get_latest_brand_version(brand_id)
-
-    response = endpoint.find_neighbors(
-        deployed_index_id=DEPLOYED_INDEX_ID,
-        queries=[query_embedding],
-        num_neighbors=top_k * 3,
-        return_full_datapoint=False
-    )
-
-    if not response or not response[0]:
+def search_brand_book(brand_id: str, query: str = None, top_k: int = 3) -> list:
+    """
+    Fetch brand info from the structured Firestore brands doc.
+    Returns a list of dicts (section_name, content) so agents can use it
+    the same way they used vector search results.
+    query is accepted for API compatibility but filtering is done structurally.
+    """
+    doc = db.collection("brands").document(brand_id).get()
+    if not doc.exists:
         return []
 
+    brand_data = doc.to_dict()
     results = []
-    for match in response[0]:
-        if not match.id.startswith(f"brand_{brand_id}_{latest_version}"):
+
+    for section_key, section_value in brand_data.items():
+        if not section_value:
             continue
-        doc = db.collection("brand_book").document(match.id).get()
-        if doc.exists:
-            results.append(doc.to_dict())
-        if len(results) >= top_k:
-            break
+        # Flatten section to readable text
+        if isinstance(section_value, dict):
+            content = "\n".join(
+                f"{k.replace('_', ' ').title()}: {v}"
+                for k, v in section_value.items()
+                if v not in (None, "", [], {})
+            )
+        elif isinstance(section_value, list):
+            content = ", ".join(str(i) for i in section_value if i)
+        else:
+            content = str(section_value)
 
-    return results
+        if content.strip():
+            results.append({
+                "title": section_key.replace("_", " ").title(),
+                "content": content,
+                "source": "firestore"
+            })
 
-
-# -------------------------------------------------
-# BRAND BOOK SYNC (called by scheduler every 5 mins)
-# -------------------------------------------------
-
-def sync_brand_book_to_vertex(brand_id: str):
-    """
-    Re-chunks current brand info from Firestore and upserts into Vertex AI
-    as a new version. Old versions remain in Vertex AI but are ignored by
-    search_brand_book which always queries the latest version.
-    """
-    import re
-
-    brand_info = get_brand_info(brand_id)
-    if not brand_info:
-        return False
-
-    # Get pending updates from brand_updates collection
-    updates_docs = (
-        db.collection("brand_updates")
-        .where(filter=FieldFilter("brand_id", "==", brand_id))
-        .where(filter=FieldFilter("synced", "==", False))
-        .stream()
-    )
-    pending_updates = [u.to_dict() | {"_id": u.id} for u in updates_docs]
-
-    if not pending_updates:
-        return False  # Nothing to sync
-
-    # Determine next version number
-    latest = get_latest_brand_version(brand_id)
-    version_num = int(latest.replace("v", "")) + 1
-    new_version = f"v{version_num}"
-
-    # Build brand book text from current brand info + pending updates
-    merged = {**brand_info}
-    for update in pending_updates:
-        merged.update(update.get("changes", {}))
-
-    brand_book_text = "\n\n".join([
-        f"## {key.replace('_', ' ').title()}\n{value}"
-        for key, value in merged.items()
-        if isinstance(value, str) and key not in ["brand_id", "updated_at"]
-    ])
-
-    # Chunk by section
-    sections = re.split(r'\n(?=## )', brand_book_text)
-    vectors_to_upsert = []
-
-    for i, section in enumerate(sections):
-        section = section.strip()
-        if not section:
-            continue
-
-        chunk_id = f"brand_{brand_id}_{new_version}_chunk_{i:03d}"
-        title = section.split('\n')[0].replace('#', '').strip()
-
-        db.collection("brand_book").document(chunk_id).set({
-            "chunk_id": chunk_id,
-            "brand_id": brand_id,
-            "version": new_version,
-            "chunk_index": i,
-            "title": title,
-            "content": section
-        })
-
-        vector = embed_text(f"{title}\n\n{section}")
-        vectors_to_upsert.append({
-            "datapoint_id": chunk_id,
-            "feature_vector": vector
-        })
-
-    # Upsert to Vertex AI
-    index = aiplatform.MatchingEngineIndex(os.getenv("VERTEX_INDEX_ID"))
-    index.upsert_datapoints(datapoints=vectors_to_upsert)
-
-    # Mark updates as synced
-    for update in pending_updates:
-        db.collection("brand_updates").document(update["_id"]).update({
-            "synced": True,
-            "synced_version": new_version
-        })
-
-    # Update brand's current version in Firestore
-    db.collection("brands").document(brand_id).update({
-        "current_version": new_version,
-        "updated_at": str(__import__("datetime").date.today())
-    })
-
-    print(f"✅ Brand book synced to {new_version} with {len(vectors_to_upsert)} chunks")
-    return True
+    return results[:top_k] if top_k else results
 
 
 # -------------------------------------------------

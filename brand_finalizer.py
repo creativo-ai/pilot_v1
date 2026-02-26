@@ -89,19 +89,28 @@ def _run_once():
 
 def _finalize_thread(thread: dict, user_id: str, brand_id: str):
     structured_fields = thread.get("collected_fields", {})
-    free_form_notes = thread.get("free_form_notes", "")
     messages = thread.get("messages", [])
 
-    # Write 1: Structured fields → Firestore brands doc
+    # Write 1: Single full JSON document write to Firestore — one doc per brand.
+    # collected_fields holds everything accumulated in the thread during the session.
+    # No incremental writes happened during the session — this is the only DB write.
     if structured_fields:
-        db.collection("brands").document(brand_id).set(structured_fields, merge=True)
-        print(f"  📝 Wrote {len(structured_fields)} structured field(s) to Firestore")
+        import datetime
+        structured_fields["metadata"] = structured_fields.get("metadata", {})
+        structured_fields["metadata"]["brand_id"] = brand_id
+        structured_fields["metadata"]["updated_at"] = str(datetime.date.today())
+        structured_fields["metadata"]["version"] = _get_next_brand_version(brand_id)
+        db.collection("brands").document(brand_id).set(structured_fields)
+        print(f"  📝 Wrote full brand JSON document to Firestore (brands/{brand_id})")
+    else:
+        print("  ⚠️  No structured fields collected, skipping Firestore write")
 
-    # Write 2: Free-form brand context → Vertex AI
+    # Write 2: Summarize the full conversation to extract rich free-form brand context.
+    # Free-form info is never stored in variables — it lives only in conversation history.
     conversation_text = "\n".join(
         f"{m['role'].upper()}: {m['content']}" for m in messages
     )
-    source_text = f"{conversation_text}\n\nAdditional notes:\n{free_form_notes}".strip()
+    source_text = conversation_text.strip()
 
     if not source_text:
         print("  ⚠️  No context to embed, skipping Vertex AI write")
@@ -129,6 +138,20 @@ def _finalize_thread(thread: dict, user_id: str, brand_id: str):
     print(f"  🧠 Brand context {chunk_id} → Firestore + Vertex AI")
 
 
+
+
+def _get_next_brand_version(brand_id: str) -> str:
+    """Increment the brand document version on each finalized session."""
+    doc = db.collection("brands").document(brand_id).get()
+    if doc.exists:
+        current = doc.to_dict().get("metadata", {}).get("version", "1.0.0")
+        try:
+            parts = current.split(".")
+            parts[-1] = str(int(parts[-1]) + 1)
+            return ".".join(parts)
+        except Exception:
+            return "1.0.1"
+    return "1.0.0"
 def _get_next_context_version(brand_id: str) -> str:
     docs = list(
         db.collection("brand_context")

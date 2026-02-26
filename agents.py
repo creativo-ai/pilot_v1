@@ -1,8 +1,7 @@
 from llm_client import get_claude_client
-from data_layer_vertexAI import get_brand_info, get_media_history, update_media_status, search_documentation, get_brand_context, get_latest_brand_context
+from data_layer_vertexAI import get_brand_info, get_media_history, update_media_status, search_documentation, get_brand_context
 import json
-from data_layer_vertexAI import update_brand_info, db as firestore_db
-import datetime
+from data_layer_vertexAI import update_brand_info
 
 # ---------------
 # Models
@@ -22,9 +21,8 @@ EMAIL_SYSTEM_PROMPT = """
     - Write ONLY the email content: subject line + body.
     - Do NOT add any explanation, commentary, highlights, or notes after the email.
     - Do NOT write things like "Here's your email:" or "Would you like changes?".
-    - Use the brand tone, identity, mission, and values provided in the brand context.
+    - Use the brand tone and identity provided.
     - If critical info is missing, ask ONE clarifying question instead of writing the email.
-    - Naturally highlight how the brand helps or adds value, without hardcoding the words.
     - Sign off using the brand signature if provided.
     """
 
@@ -45,13 +43,13 @@ def write_email(
     brand_info = get_brand_info(brand_id) or {}
     # Path B: rich contextual brand info from Vertex AI
     brand_ctx_chunks = brand_chunks or get_brand_context(brand_id, query=user_input, top_k=2)
-    chunks_text = chunks_text = "\n\n---\n\n".join(
-        [
-            f"{c.get('title', c.get('chunk_id', ''))}\n{c.get('content', '')}" 
-            for c in brand_ctx_chunks
-        ]
+    chunks_text = "\n\n---\n\n".join(
+            [
+                f"{c.get('title') or c.get('chunk_id', '')}\n{c.get('content', '')}"
+                for c in brand_ctx_chunks
+            ]
         ) or "No additional brand context."
-
+    
     brand_context = f"""
         Brand Name: {brand_info.get("brand_name")}
         Tone: {brand_info.get("tone")}
@@ -490,16 +488,7 @@ def brand_update_agent(
                 "No brand fields were found to update."
             )
 
-        # Store pending updates in Firestore
-        firestore_db.collection("brand_updates").add({
-            "brand_id": brand_id,
-            "changes": changes,
-            "synced": False,
-            "created_at": str(datetime.date.today()),
-            "requested_by": user_id
-        })
-
-        # Apply changes immediately in brand info
+        # Apply changes directly to Firestore brands doc
         update_brand_info(brand_id, changes)
         fields_updated = ", ".join(changes.keys())
         action_result = f"Successfully updated brand fields: {fields_updated}. Changes will sync to brand book vectors within 5 minutes."
@@ -536,8 +525,6 @@ CRITICAL RULES:
 - No bullet points about what you did
 - No "Would you like changes?" at the end
 - Start directly with the caption content
-- Use the brand context (identity, mission, values, tone) to naturally integrate the brand into the post.
-- Highlight how the brand or product provides value to the audience without hardcoding phrases.
 """
 
 
