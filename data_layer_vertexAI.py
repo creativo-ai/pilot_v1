@@ -80,27 +80,25 @@ def search_documentation(query: str, top_k: int = 3) -> list:
     if all(v == 0.0 for v in query_embedding[:5]):
         return []
 
-    try:
-        response = endpoint.find_neighbors(
-            deployed_index_id=DEPLOYED_INDEX_ID,
-            queries=[query_embedding],
-            num_neighbors=top_k * 2,
-            return_full_datapoint=False
-        )
-    except Exception as e:
-        print(f"⚠️ search_documentation failed (Vertex AI unavailable?): {e}")
-        return []
+    response = endpoint.find_neighbors(
+        deployed_index_id=DEPLOYED_INDEX_ID,
+        queries=[query_embedding],
+        num_neighbors=top_k * 2,  # fetch more to filter out brand book chunks
+        return_full_datapoint=False
+    )
 
     if not response or not response[0]:
         return []
 
     results = []
     for match in response[0]:
+        # Skip brand book chunks
         if match.id.startswith("brand_"):
             continue
         doc = db.collection("docs").document(match.id).get()
         if doc.exists:
             data = doc.to_dict()
+            # Normalize field names — support both 'content' and 'text'
             if "text" in data and "content" not in data:
                 data["content"] = data["text"]
             if "filepath" in data and "filename" not in data:
@@ -134,34 +132,30 @@ def get_latest_brand_version(brand_id: str) -> str:
 
 
 def search_brand_book(brand_id: str, query: str, top_k: int = 3) -> list:
-    try:
-        query_embedding = embed_text(query)
-        latest_version = get_latest_brand_version(brand_id)
+    query_embedding = embed_text(query)
+    latest_version = get_latest_brand_version(brand_id)
 
-        response = endpoint.find_neighbors(
-            deployed_index_id=DEPLOYED_INDEX_ID,
-            queries=[query_embedding],
-            num_neighbors=top_k * 3,
-            return_full_datapoint=False
-        )
+    response = endpoint.find_neighbors(
+        deployed_index_id=DEPLOYED_INDEX_ID,
+        queries=[query_embedding],
+        num_neighbors=top_k * 3,
+        return_full_datapoint=False
+    )
 
-        if not response or not response[0]:
-            return []
-
-        results = []
-        for match in response[0]:
-            if not match.id.startswith(f"brand_{brand_id}_{latest_version}"):
-                continue
-            doc = db.collection("brand_book").document(match.id).get()
-            if doc.exists:
-                results.append(doc.to_dict())
-            if len(results) >= top_k:
-                break
-
-        return results
-    except Exception as e:
-        print(f"⚠️ search_brand_book failed (Vertex AI unavailable?): {e}")
+    if not response or not response[0]:
         return []
+
+    results = []
+    for match in response[0]:
+        if not match.id.startswith(f"brand_{brand_id}_{latest_version}"):
+            continue
+        doc = db.collection("brand_book").document(match.id).get()
+        if doc.exists:
+            results.append(doc.to_dict())
+        if len(results) >= top_k:
+            break
+
+    return results
 
 
 # -------------------------------------------------
@@ -278,3 +272,77 @@ def search_media(user_id: str, brand_id: str, status: str = None, media_type: st
 # Backward compatibility aliases
 get_image_history = get_media_history
 update_image_status = update_media_status
+
+# =============================================================================
+# DUAL BRAND RETRIEVAL (new)
+# =============================================================================
+
+def get_brand_field(brand_id: str, field_name: str):
+    """
+    Path A: Fetch a specific structured field directly from Firestore.
+    Fast and exact. Use when you need tone, mission, colors, etc.
+    """
+    doc = db.collection("brands").document(brand_id).get()
+    return doc.to_dict().get(field_name) if doc.exists else None
+
+
+def get_brand_context(brand_id: str, query: str, top_k: int = 3) -> list:
+    """
+    Path B: Semantic search over free-form brand context in Vertex AI.
+    Use when you need rich contextual info: positioning, story, nuances.
+    Returns list of context chunk dicts.
+    """
+    try:
+        query_embedding = embed_text(query)
+
+        response = endpoint.find_neighbors(
+            deployed_index_id=DEPLOYED_INDEX_ID,
+            queries=[query_embedding],
+            num_neighbors=top_k * 3,
+            return_full_datapoint=False
+        )
+
+        if not response or not response[0]:
+            return []
+
+        results = []
+        for match in response[0]:
+            # Only brand context chunks (prefix: ctx_)
+            if not match.id.startswith(f"ctx_{brand_id}"):
+                continue
+            doc = db.collection("brand_context").document(match.id).get()
+            if doc.exists:
+                results.append(doc.to_dict())
+            if len(results) >= top_k:
+                break
+
+        return results
+
+    except Exception as e:
+        print(f"⚠️ get_brand_context failed: {e}")
+        return []
+
+
+def get_latest_brand_context(brand_id: str) -> str:
+    """
+    Returns the most recent free-form brand context summary as plain text.
+    Useful for agents that need the full context without a specific query.
+    """
+    docs = list(
+        db.collection("brand_context")
+        .where("brand_id", "==", brand_id)
+        .stream()
+    )
+    if not docs:
+        return ""
+
+    # Sort by version descending, return latest content
+    def version_num(d):
+        v = d.to_dict().get("version", "v1")
+        try:
+            return int(v.replace("v", ""))
+        except Exception:
+            return 1
+
+    latest = max(docs, key=version_num)
+    return latest.to_dict().get("content", "")

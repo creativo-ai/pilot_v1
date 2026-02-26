@@ -1,5 +1,5 @@
-from llm_client import get_claude_client, gemini_generate
-from data_layer_vertexAI import get_brand_info, get_media_history, update_media_status, search_documentation
+from llm_client import get_claude_client
+from data_layer_vertexAI import get_brand_info, get_media_history, update_media_status, search_documentation, get_brand_context, get_latest_brand_context
 import json
 from data_layer_vertexAI import update_brand_info, db as firestore_db
 import datetime
@@ -7,9 +7,8 @@ import datetime
 # ---------------
 # Models
 # ---------------
-MODEL_SONNET = "claude-sonnet-4-6"         # email, caption, talk
-MODEL_HAIKU = "claude-haiku-4-5-20251001"   # docs/media formatting
-# Gemini 2.5 Flash: conversational wrapper + brand field extraction (via gemini_generate)
+MODEL_SONNET = "claude-sonnet-4-6"        # email, caption, talk
+MODEL_HAIKU = "claude-haiku-4-5-20251001"  # docs/media formatting
 
 
 # ---------------
@@ -23,8 +22,9 @@ EMAIL_SYSTEM_PROMPT = """
     - Write ONLY the email content: subject line + body.
     - Do NOT add any explanation, commentary, highlights, or notes after the email.
     - Do NOT write things like "Here's your email:" or "Would you like changes?".
-    - Use the brand tone and identity provided.
+    - Use the brand tone, identity, mission, and values provided in the brand context.
     - If critical info is missing, ask ONE clarifying question instead of writing the email.
+    - Naturally highlight how the brand helps or adds value, without hardcoding the words.
     - Sign off using the brand signature if provided.
     """
 
@@ -41,10 +41,16 @@ def write_email(
     if client is None:
         client = get_claude_client()
 
+    # Path A: structured fields from Firestore
     brand_info = get_brand_info(brand_id) or {}
-    chunks_text = "\n\n---\n\n".join(
-        [f"{c.get('title', '')}\n{c.get('content', '')}" for c in (brand_chunks or [])]
-    ) or "No additional brand context."
+    # Path B: rich contextual brand info from Vertex AI
+    brand_ctx_chunks = brand_chunks or get_brand_context(brand_id, query=user_input, top_k=2)
+    chunks_text = chunks_text = "\n\n---\n\n".join(
+        [
+            f"{c.get('title', c.get('chunk_id', ''))}\n{c.get('content', '')}" 
+            for c in brand_ctx_chunks
+        ]
+        ) or "No additional brand context."
 
     brand_context = f"""
         Brand Name: {brand_info.get("brand_name")}
@@ -52,7 +58,7 @@ def write_email(
         Brand Voice: {brand_info.get("brand_voice")}
         Sign Off: {brand_info.get("default_email_signature", "Best regards,\nCreativo Team")}
 
-        Relevant Brand Book Sections:
+        Rich Brand Context:
         {chunks_text}
         """
 
@@ -107,8 +113,9 @@ def talk_agent(
     if client is None:
         client = get_claude_client()
 
+    # Path A: structured fields from Firestore
     brand_info = get_brand_info(brand_id) or {}
-    brand_context = f"""
+    brand_context_str = f"""
         Brand Name: {brand_info.get("brand_name", "Unknown")}
         Tone: {brand_info.get("tone", "")}
         Mission: {brand_info.get("mission", "")}
@@ -116,13 +123,15 @@ def talk_agent(
         Values: {brand_info.get("values", "")}
         Target Audience: {brand_info.get("target_audience", "")}
         """
+    # Path B: rich brand context from Vertex AI for nuanced questions
+    ctx_chunks = brand_chunks or get_brand_context(brand_id, query=user_input, top_k=2)
     chunks_text = "\n\n---\n\n".join(
-        [f"{c.get('title', '')}\n{c.get('content', '')}" for c in (brand_chunks or [])]
+        [f"{c.get('title', c.get('chunk_id',''))}\n{c.get('content', '')}" for c in ctx_chunks]
     ) or "No additional brand context."
 
     system = TALK_SYSTEM_PROMPT.format(
         brand_name=brand_info.get("brand_name", "the brand"),
-        brand_context=brand_context,
+        brand_context=brand_context_str,
         brand_book=chunks_text
     )
 
@@ -241,9 +250,28 @@ CONVERSATIONAL_SYSTEM_PROMPT="""You are a warm, conversational AI assistant.
     - Never output raw JSON."""
 
 def _conversational_response(client, user_input: str, conversation_history: list, action_result: str) -> str:
-    # Gemini 2.5 Flash — fast conversational wrapping
+
     prompt = f"User asked: {user_input}\n\nAction completed: {action_result}\n\nCommunicate this result conversationally to the user."
-    return gemini_generate(prompt=prompt, system=CONVERSATIONAL_SYSTEM_PROMPT)
+    if client is None:
+        client = get_claude_client()
+
+    messages = []
+    for msg in conversation_history:
+        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": user_input})
+
+    response = client.messages.create(
+        model=MODEL_HAIKU,
+        system=CONVERSATIONAL_SYSTEM_PROMPT,
+        messages=messages,
+        max_tokens=600
+    )
+
+    for block in response.content:
+        if getattr(block, "type", None) == "text":
+            return block.text.strip()
+
+    return "Sorry, I couldn't respond."
 
 # ---------------
 # Image Agents
@@ -413,13 +441,29 @@ def brand_update_agent(
     if client is None:
         client = get_claude_client()
 
-    # Gemini 2.5 Flash — best structured JSON extraction accuracy
-    # gemini_generate already strips code fences, returns plain string
-    history_text = "\n".join([f"{m['role']}: {m['content']}" for m in conversation_history])
-    raw = gemini_generate(
-        prompt=f"{history_text}\nuser: {user_input}",
-        system=BRAND_UPDATE_SYSTEM_PROMPT
+    # Build conversation history for Claude
+    messages = [{"role": m["role"], "content": m["content"]} for m in conversation_history]
+    messages.append({"role": "user", "content": user_input})
+
+    # Call Claude Haiku for structured JSON extraction
+    response = client.messages.create(
+        model=MODEL_HAIKU,
+        system=BRAND_UPDATE_SYSTEM_PROMPT,
+        messages=messages,
+        max_tokens=500
     )
+
+    raw = ""
+    for block in response.content:
+        if getattr(block, "type", None) == "text":
+            raw += block.text
+
+    # Strip code fences if present
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
 
     try:
         parsed = json.loads(raw)
@@ -492,6 +536,8 @@ CRITICAL RULES:
 - No bullet points about what you did
 - No "Would you like changes?" at the end
 - Start directly with the caption content
+- Use the brand context (identity, mission, values, tone) to naturally integrate the brand into the post.
+- Highlight how the brand or product provides value to the audience without hardcoding phrases.
 """
 
 

@@ -20,9 +20,7 @@ def get_gemini_client() -> genai.Client:
 def gemini_generate(prompt: str, system: str = None) -> str:
     """
     Single-turn Gemini 2.5 Flash call.
-    Accepts the same (prompt, system) pattern as Claude calls.
-    Always returns a plain string — no content blocks, no formatting surprises.
-    Strips markdown code fences Gemini sometimes adds around JSON.
+    Returns plain string. Strips markdown code fences automatically.
     """
     client = get_gemini_client()
 
@@ -39,7 +37,7 @@ def gemini_generate(prompt: str, system: str = None) -> str:
 
     text = (response.text or "").strip()
 
-    # Strip markdown code fences Gemini sometimes wraps JSON in
+    # Strip markdown code fences Gemini sometimes adds around JSON
     if text.startswith("```"):
         parts = text.split("```")
         text = parts[1] if len(parts) > 1 else text
@@ -50,7 +48,7 @@ def gemini_generate(prompt: str, system: str = None) -> str:
     return text
 
 
-# ── Legacy classify_intent (used by actions_registry path) ───────────────────
+# ── Legacy classify_intent (used by actions_registry / orchestrator) ──────────
 
 def classify_intent(client, user_input: str, conversation_history: list,
                     available_actions: dict, user_id: str = "", brand_id: str = ""):
@@ -74,13 +72,13 @@ def classify_intent(client, user_input: str, conversation_history: list,
         Your ONLY job:
         - Select exactly ONE action from the available actions below.
         - Extract required arguments.
-        - NEVER default to "talk" if another action clearly matches the user's intent.
+        - NEVER default to "talk" if another action clearly matches.
         - NEVER ask questions. NEVER explain. NEVER respond conversationally.
 
         Available actions:
         {actions_text}
 
-        You MUST return ONLY valid JSON. No markdown. No text. No explanation.
+        Return ONLY valid JSON. No markdown. No text. No explanation.
 
         Format exactly:
         {{

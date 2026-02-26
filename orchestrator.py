@@ -13,11 +13,11 @@ from agents import (
     write_caption_agent
 )
 
-# Agents that generate final content — return their result directly, skip Claude's rewrite
-CONTENT_AGENTS = {"write_email", "write_caption", "search_docs"}
-
-# Agents that perform DB actions — result passed back to Claude to summarize
+# Agents that perform DB actions — no streaming, return instantly
 ACTION_AGENTS = {"list_pending_media", "approve_media", "reject_media", "search_media", "update_brand"}
+
+# Agents that generate text — support streaming
+STREAMING_AGENTS = {"write_email", "write_caption", "search_docs", "talk"}
 
 TOOLS = [
     {
@@ -105,15 +105,6 @@ TOOLS = [
             },
             "required": ["query"]
         }
-    },
-    {
-        "name": "get_brand",
-        "description": "Get the current brand information including colors, tone, mission, vision, values, and target audience. Use this whenever the user asks about brand settings, colors, tone, or any brand identity field.",
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
     }
 ]
 
@@ -125,8 +116,7 @@ AVAILABLE_AGENTS = {
     "search_media": search_media_agent,
     "write_caption": write_caption_agent,
     "update_brand": brand_update_agent,
-    "search_docs": search_docs_agent,
-    "get_brand": None  # handled inline in orchestrate()
+    "search_docs": search_docs_agent
 }
 
 
@@ -147,22 +137,12 @@ def build_system_prompt(brand_info: dict, brand_context_chunks: list) -> str:
     return f"""
         You are a helpful AI assistant for a marketing agency.
 
-        ## Brand Identity (cached at session start)
+        ## Brand Identity (always available)
         {brand_identity}
 
         ## Relevant Brand Book Sections
         {brand_book_context}
 
-        ## Tool Usage Rules
-        - ALWAYS use "get_brand" when the user asks about ANY brand setting: colors, tone, voice, mission, vision, values, target audience. NEVER answer brand questions from memory or from the cached brand identity above.
-        - Use "list_pending_media" when the user asks specifically about pending media needing approval.
-        - Use "update_brand" when the user wants to change or add any brand information.
-        - Use "search_media" for media history, status, filtering by type/platform/status. ALWAYS use this tool, never answer from memory.
-        - If the user wants to approve or reject media by position or description instead of ID, MUST call "search_media" first to get IDs, then approve/reject.
-        - Use "approve_media" or "reject_media" to approve or reject media.
-        - Use "write_caption" for social media posts or captions.
-        - Use "write_email" to write or draft an email.
-        - Use "search_docs" ONLY for platform how-to questions (sign up, sign in, subscription).
         """
 
 
@@ -182,7 +162,6 @@ def orchestrate(
 
     brand_info = get_brand_info(brand_id) or {}
     brand_chunks = search_brand_book(brand_id=brand_id, query=user_input.strip(), top_k=3)
-    print(f"  Brand context: {len(brand_chunks)} chunk(s) retrieved from brand book")
     system_prompt = build_system_prompt(brand_info, brand_chunks)
 
     messages = []
@@ -227,32 +206,21 @@ def orchestrate(
                     tool_args = block.input
                     print(f"  Tool called: {tool_name} | Args: {tool_args}")
 
-                    # Handle get_brand inline — always fetch fresh from DB
-                    if tool_name == "get_brand":
-                        fresh_brand = get_brand_info(brand_id) or {}
-                        result = json.dumps(fresh_brand, indent=2)
-                        last_text_response = None  # let Claude format this response
-
+                    agent_fn = AVAILABLE_AGENTS.get(tool_name)
+                    if agent_fn:
+                        # Stream text agents on final call, not intermediate steps
+                        result = agent_fn(
+                            user_input=user_input,
+                            conversation_history=conversation_history,
+                            user_id=user_id,
+                            brand_id=brand_id,
+                            client=client,
+                            brand_chunks=brand_chunks,
+                            **tool_args
+                        )
+                        last_text_response = result
                     else:
-                        agent_fn = AVAILABLE_AGENTS.get(tool_name)
-                        if agent_fn:
-                            result = agent_fn(
-                                user_input=user_input,
-                                conversation_history=conversation_history,
-                                user_id=user_id,
-                                brand_id=brand_id,
-                                client=client,
-                                brand_chunks=brand_chunks,
-                                **tool_args
-                            )
-                            last_text_response = result
-                            # Content agents produce the final answer — return immediately
-                            if tool_name in CONTENT_AGENTS:
-                                if stream:
-                                    return _stream_text(result)
-                                return result
-                        else:
-                            result = f"Tool '{tool_name}' not found."
+                        result = f"Tool '{tool_name}' not found."
 
                     tool_results.append({
                         "type": "tool_result",
