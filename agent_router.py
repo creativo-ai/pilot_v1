@@ -14,13 +14,21 @@ class EmailAgent(BaseAgent):
     name = "email"
     domain = "Writing, drafting, or creating email messages."
 
-    def run(self, user_input, history, user_id, brand_id, routing_context=None, **kwargs):
+    def run(self, user_input, history, user_id, brand_id, routing_context=None, last_turn=None, **kwargs):
         from agents import write_email
         from llm_client import get_claude_client
         client = get_claude_client()
+
+        seeded_history = list(history)
+        if last_turn and last_turn.get("response"):
+            seeded_history = [
+                {"role": "user",      "content": last_turn.get("user", "")},
+                {"role": "assistant", "content": last_turn["response"]}
+            ] + seeded_history
+
         return write_email(
             user_input=user_input,
-            conversation_history=history,
+            conversation_history=seeded_history,
             user_id=user_id,
             brand_id=brand_id,
             client=client,
@@ -32,13 +40,23 @@ class CaptionAgent(BaseAgent):
     name = "caption"
     domain = "Writing social media captions or posts for any platform."
 
-    def run(self, user_input, history, user_id, brand_id, routing_context=None, **kwargs):
+    def run(self, user_input, history, user_id, brand_id, routing_context=None, last_turn=None, **kwargs):
         from agents import write_caption_agent
         from llm_client import get_claude_client
         client = get_claude_client()
+
+        # Seed the previous turn's full response into history
+        # so the model sees exactly what was shown (media titles, IDs, statuses)
+        seeded_history = list(history)
+        if last_turn and last_turn.get("response"):
+            seeded_history = [
+                {"role": "user",      "content": last_turn.get("user", "")},
+                {"role": "assistant", "content": last_turn["response"]}
+            ] + seeded_history
+
         return write_caption_agent(
             user_input=user_input,
-            conversation_history=history,
+            conversation_history=seeded_history,
             user_id=user_id,
             brand_id=brand_id,
             client=client,
@@ -48,7 +66,7 @@ class CaptionAgent(BaseAgent):
 
 class TalkAgent(BaseAgent):
     name = "talk"
-    domain = "General brand conversation, brand identity questions, or anything not covered by other agents."
+    domain = "Formatter and presenter for media search and media approval results only. Not used for conversation."
 
     def run(self, user_input, history, user_id, brand_id, routing_context=None, **kwargs):
         from agents import talk_agent
@@ -75,14 +93,16 @@ class MediaApprovalAgent(BaseAgent):
     name = "media_approval"
     domain = "Approving or rejecting images and videos. Listing pending media awaiting approval."
 
-    def run(self, user_input, history, user_id, brand_id, routing_context=None, **kwargs):
+    def run(self, user_input, history, user_id, brand_id, routing_context=None, last_turn=None, **kwargs):
         # Delegate to orchestrator which handles multi-step approve/reject via tool calling
         from orchestrator import orchestrate
         return orchestrate(
             user_input=user_input,
             conversation_history=history,
             user_id=user_id,
-            brand_id=brand_id
+            brand_id=brand_id,
+            routing_context=routing_context,
+            last_turn=last_turn,
         )
 
 
@@ -142,7 +162,7 @@ class DocsAgent(BaseAgent):
 
 class BrandOnboardingAgent(BaseAgent):
     name = "brand_onboarding"
-    domain = "Collecting brand information from scratch, onboarding a new brand, setting up brand identity."
+    domain = "All brand conversation: brand lookups, strategy, messaging, audience questions, expansion ideas, and new onboarding. Default agent for any brand or general conversation."
 
     def run(self, user_input, history, user_id, brand_id, routing_context=None, **kwargs):
         from brand_onboarding_agent import BrandOnboardingAgent as _Agent
@@ -170,27 +190,46 @@ AGENT_REGISTRY: list[BaseAgent] = [
 ]
 
 
-def find_best_agent(user_input: str, exclude: str = None) -> BaseAgent | None:
+def find_best_agent(user_input: str, exclude: str = None, conversation_context: str = None) -> BaseAgent | None:
     """
     Use a single Gemini call to pick the best agent.
-    Much cheaper than calling can_handle() on each agent individually.
+    Passes full agent descriptions and conversation context for accurate routing.
     """
-    agent_names = [a.name for a in AGENT_REGISTRY if a.name != exclude]
+    agents = [a for a in AGENT_REGISTRY if a.name != exclude]
 
+    agent_descriptions = "\n".join([f"- {a.name}: {a.domain}" for a in agents])
+    context_hint = f"\n\nRecent conversation:\n{conversation_context}" if conversation_context else ""
+
+    from debug_hooks import log_routing_decision
     answer = gemini_generate(
-        prompt=user_input,
+        prompt=f"User message: {user_input}{context_hint}",
         system=(
-            f"Return ONLY the single agent name that best fits this request. "
-            f"Choose from: {', '.join(agent_names)}"
+            f"You are a routing classifier for a marketing AI assistant.\n"
+            f"Return ONLY the single agent name that best fits the user message.\n\n"
+            f"Agent options:\n{agent_descriptions}\n\n"
+            f"Routing rules:\n"
+            f"- 'docs': ONLY for app how-to — sign in, sign up, password reset, subscription steps\n"
+            f"- 'talk': ONLY used as a formatter/presenter for media_search and media_approval results. Nothing else.\n"
+            f"- 'email': any email writing, campaign, or newsletter request\n"
+            f"- 'caption': writing social media posts or captions for any platform\n"
+            f"- 'brand_onboarding': ALL brand conversation — lookups, strategy, messaging, audience, general chat, everything brand-related that is not a direct field update\n"
+            f"- 'media_approval': approving or rejecting media items\n"
+            f"- 'media_search': listing, searching, or viewing media\n"
+            f"- 'brand_update': updating a specific brand field with an exact new value\n"
+            f"- 'docs': app how-to questions only\n"
+            f"- Use the conversation context to understand what the user is referring to and route accordingly\n"
+            f"- When in doubt → 'brand_onboarding'\n"
+            f"Return ONLY the agent name, nothing else."
         )
     ).strip().lower()
 
-    # Find matching agent
+    log_routing_decision(user_input, answer)
+
     for agent in AGENT_REGISTRY:
         if agent.name == answer and agent.name != exclude:
             return agent
 
-    # Fallback: return TalkAgent if no match
+    # Fallback to talk
     for agent in AGENT_REGISTRY:
         if agent.name == "talk":
             return agent

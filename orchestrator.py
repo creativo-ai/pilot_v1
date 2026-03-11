@@ -39,18 +39,18 @@ TOOLS = [
     },
     {
         "name": "approve_media",
-        "description": "Approve one or more media by ID.",
+        "description": "Approve one or more media by ID. IMPORTANT: Only approve media that have status=pending. If the user says 'first 2 pending' or similar, you MUST call list_pending_media or search_media with status=pending first to get the correct IDs, then approve only those.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "media_ids": {"type": "array", "items": {"type": "string"}, "description": "List of media IDs to approve"}
+                "media_ids": {"type": "array", "items": {"type": "string"}, "description": "List of media IDs to approve — must be pending status only"}
             },
             "required": ["media_ids"]
         }
     },
     {
         "name": "reject_media",
-        "description": "Reject one or more media by ID.",
+        "description": "Reject one or more media by ID. IMPORTANT: If the user refers to media by position or description (e.g. 'last TikTok video'), you MUST call search_media first to get the correct IDs, then reject only those.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -66,7 +66,7 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "status": {"type": "string", "description": "Filter by status: pending, approved, or rejected."},
-                "media_type": {"type": "string", "description": "Filter by type: media or video."},
+                "media_type": {"type": "string", "description": "Filter by type: must be exactly 'image' or 'video'. Never use 'media'."},
                 "platform": {"type": "string", "description": "Filter by platform: Instagram, LinkedIn, TikTok, Facebook, YouTube, Website, Twitter."}
             },
             "required": []
@@ -143,6 +143,17 @@ def build_system_prompt(brand_info: dict, brand_context_chunks: list) -> str:
         ## Relevant Brand Book Sections
         {brand_book_context}
 
+        ## Media Rules
+
+        Only PENDING items can be approved or rejected. Status is final once set — approved and rejected items cannot be changed.
+
+        Before approving or rejecting anything, always verify the current status via search_media.
+        If a referenced item is not pending, ask the user to clarify — do not act on it.
+        If the user insists on changing a non-pending item, tell them it cannot be done.
+
+        Ordinal references ("first", "last", "second") refer to position in the list last shown to the user, not to pending-only position.
+
+        - Use search_docs only for platform how-to questions.
         """
 
 
@@ -152,6 +163,8 @@ def orchestrate(
     user_id: str,
     brand_id: str,
     stream: bool = False,
+    routing_context: str = None,
+    last_turn: dict = None,
     **kwargs
 ):
     client = get_claude_client()
@@ -163,6 +176,22 @@ def orchestrate(
     brand_info = get_brand_info(brand_id) or {}
     brand_chunks = search_brand_book(brand_id=brand_id, query=user_input.strip(), top_k=3)
     system_prompt = build_system_prompt(brand_info, brand_chunks)
+
+    # Inject routing context so agent knows what was just discussed (e.g. which media was listed)
+    if last_turn and last_turn.get("response"):
+        system_prompt += (
+            "\n\n## Previous Turn\n"
+            f"The user previously said: {last_turn.get('user', '')}\n"
+            f"You (or a peer agent) responded:\n{last_turn['response']}\n\n"
+            "Use this to resolve references in the current message. "
+            "Ordinal references like 'first 2', 'last one', 'the third' refer to the numbered "
+            "items in the response above — resolve them to exact IDs before calling any tool."
+        )
+    elif routing_context:
+        system_prompt += (
+            "\n\n## Recent Conversation Context\n"
+            + routing_context
+        )
 
     messages = []
     for msg in conversation_history:

@@ -1,5 +1,5 @@
 from llm_client import get_claude_client
-from data_layer_vertexAI import get_brand_info, get_media_history, update_media_status, search_documentation, get_brand_context
+from data_layer_vertexAI import get_brand_info, get_media_history, update_media_status, search_documentation, get_brand_context, get_brand_field, get_latest_brand_context
 import json
 from data_layer_vertexAI import update_brand_info
 
@@ -15,16 +15,25 @@ MODEL_HAIKU = "claude-haiku-4-5-20251001"  # docs/media formatting
 # ---------------
 
 EMAIL_SYSTEM_PROMPT = """
-    You are an expert email writer for a marketing agency.
+You are an expert email writer for a marketing agency called {brand_name}.
 
-    Rules:
-    - Write ONLY the email content: subject line + body.
-    - Do NOT add any explanation, commentary, highlights, or notes after the email.
-    - Do NOT write things like "Here's your email:" or "Would you like changes?".
-    - Use the brand tone and identity provided.
-    - If critical info is missing, ask ONE clarifying question instead of writing the email.
-    - Sign off using the brand signature if provided.
-    """
+## Brand Context
+{agency_context}
+
+## Rules
+- All brand info is provided above — use it directly, never ask the user for them unless they are not available.
+- Write ONLY the email: subject line + body. No commentary before or after.
+- Do NOT write "Here's your email:" or "Would you like changes?".
+- Sign off using the brand signature provided.
+- Default target audience is the brand audience.
+- If you need a specific brand detail not in the context above, it will be injected — do not ask.
+- ONLY ask a question if the request has absolutely no topic, product, or subject at all.
+- If you have any topic or product from the conversation, write the email immediately.
+- Never ask the same question twice.
+
+## If Brand Info Is Missing
+{missing_note}
+"""
 
 
 def write_email(
@@ -34,40 +43,59 @@ def write_email(
     brand_id: str,
     client=None,
     brand_chunks: list = None,
+    missing_brand_info: str = None,
     **kwargs
 ):
     if client is None:
         client = get_claude_client()
 
-    # Path A: structured fields from Firestore
+    # Layer 1: Structured fields from Firestore brands doc (always loaded — fast, small)
     brand_info = get_brand_info(brand_id) or {}
-    # Path B: rich contextual brand info from Vertex AI
-    brand_ctx_chunks = brand_chunks or get_brand_context(brand_id, query=user_input, top_k=2)
-    chunks_text = "\n\n---\n\n".join(
-            [
-                f"{c.get('title') or c.get('chunk_id', '')}\n{c.get('content', '')}"
-                for c in brand_ctx_chunks
-            ]
-        ) or "No additional brand context."
-    
-    brand_context = f"""
-        Brand Name: {brand_info.get("brand_name")}
-        Tone: {brand_info.get("tone")}
-        Brand Voice: {brand_info.get("brand_voice")}
-        Sign Off: {brand_info.get("default_email_signature", "Best regards,\nCreativo Team")}
+    brand_name = brand_info.get("brand_name", "the agency")
 
-        Rich Brand Context:
-        {chunks_text}
-        """
+    # Layer 2: Brand context embedding summary (always loaded — narrative richness)
+    brand_summary = get_latest_brand_context(brand_id) or ""
+
+    # Layer 3: On-demand — only load full brand book fields if Layer 1+2 seem thin
+    # Check if tone or voice are missing from structured fields before fetching
+    extra_fields = {}
+    for field in ["tone", "brand_voice", "target_audience", "communication_style"]:
+        if not brand_info.get(field):
+            val = get_brand_field(brand_id, field)
+            if val:
+                extra_fields[field] = val
+
+    agency_context = f"""Brand Name: {brand_name}
+Tone: {brand_info.get("tone") or extra_fields.get("tone", "")}
+Brand Voice: {brand_info.get("brand_voice") or extra_fields.get("brand_voice", "")}
+Target Audience: {brand_info.get("target_audience") or extra_fields.get("target_audience", "")}
+Mission: {brand_info.get("mission", "")}
+Values: {brand_info.get("values", "")}
+Communication Style: {brand_info.get("communication_style") or extra_fields.get("communication_style", "")}
+Sign Off: {brand_info.get("default_email_signature", f"Best regards,\n{brand_name} Team")}
+{("\nBrand Context Summary:\n" + brand_summary) if brand_summary else ""}
+"""
+
+    missing_note = (
+        f"The following info was provided by the user and should be used: {missing_brand_info}"
+        if missing_brand_info else
+        "All brand info is available above."
+    )
 
     messages = []
     for msg in conversation_history:
         messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": user_input})
 
+    system = EMAIL_SYSTEM_PROMPT.format(
+        brand_name=brand_name,
+        agency_context=agency_context,
+        missing_note=missing_note
+    )
+
     response = client.messages.create(
         model=MODEL_SONNET,
-        system=EMAIL_SYSTEM_PROMPT + "\n\n" + brand_context,
+        system=system,
         messages=messages,
         max_tokens=1000
     )
@@ -84,19 +112,25 @@ def write_email(
 # ---------------
 
 TALK_SYSTEM_PROMPT = """
-    You are a conversational AI assistant for {brand_name}.
+You are a conversational AI assistant for {brand_name}.
 
-    ## Brand Info
-    {brand_context}
+## Brand Info
+{brand_context}
 
-    ## Relevant Brand Book Sections
-    {brand_book}
+## Relevant Brand Book Sections
+{brand_book}
 
-    - Be warm and natural.
-    - Use the brand info above when answering brand-related questions.
-    - Never output JSON.
-    - Keep responses concise and conversational.
-    """
+## Background Context (from previous agent)
+{routing_context}
+
+## Rules
+- Be warm and natural.
+- Use the brand info above when answering brand-related questions.
+- Never output JSON.
+- Keep responses concise and conversational.
+- If background context contains [RESOLVED] topics — do NOT ask about them or follow up on them.
+  They are history. Focus only on the user's current message.
+"""
 
 
 def talk_agent(
@@ -127,10 +161,12 @@ def talk_agent(
         [f"{c.get('title', c.get('chunk_id',''))}\n{c.get('content', '')}" for c in ctx_chunks]
     ) or "No additional brand context."
 
+    routing_ctx = kwargs.get("routing_context", "") or ""
     system = TALK_SYSTEM_PROMPT.format(
         brand_name=brand_info.get("brand_name", "the brand"),
         brand_context=brand_context_str,
-        brand_book=chunks_text
+        brand_book=chunks_text,
+        routing_context=routing_ctx if routing_ctx else "None."
     )
 
     messages = []
@@ -157,15 +193,23 @@ def talk_agent(
 # ---------------
 
 SEARCH_DOCS_SYSTEM_PROMPT = """
-    You are a helpful assistant that answers questions using the provided documentation.
+    You are a helpful assistant that answers app how-to questions using the provided documentation.
     - Answer based ONLY on the documentation chunks provided.
-    - If the answer is not in the docs, say so clearly.
+    - If the answer is not in the docs, say clearly: "I don't have documentation on that yet."
     - Be concise and direct.
     - Never output JSON.
     - Do NOT add commentary after your answer.
-    - CRITICAL: If the documentation chunk contains a "Media in this section" block with URLs, you MUST include ALL of them in your response using the exact formats below. Never skip or omit media.
+    - NEVER ask the user a clarifying question — if you cannot answer from the docs, say so and stop.
+    - NEVER ask "Could you clarify what you mean?" or "Can you tell me more?" — not your job.
+
+    MEDIA PLACEMENT RULES — follow exactly:
+    - Media (images and videos) must appear INLINE directly after the step or sentence they illustrate.
+    - NEVER group all media at the end of the response.
+    - If a step says "click the Sign In button" and there is a screenshot of it, place the image immediately after that sentence.
+    - If there is a walkthrough video, place it at the start before the steps.
     - Images → render as: ![image](url)
-    - YouTube videos → render as a labeled link: 🎬 [Watch Video](url)
+    - YouTube videos → render as: 🎬 [Watch Video](url)
+    - CRITICAL: Include ALL media from the documentation. Never skip any.
     """
 
 
@@ -218,7 +262,11 @@ def search_docs_agent(
             else:
                 media_summary.append(f"![image]({url})")
 
-    media_block = ("\n\nIMPORTANT — include these media links verbatim in your response:\n" + "\n".join(media_summary)) if media_summary else ""
+    media_block = (
+        "\n\nMEDIA PLACEMENT INSTRUCTION: Place each of these media items INLINE "
+        "directly after the step or sentence they illustrate — do NOT group them at the end:\n"
+        + "\n".join(media_summary)
+    ) if media_summary else ""
 
     response = client.messages.create(
         model=MODEL_HAIKU,
@@ -312,7 +360,7 @@ def approve_media(
     if client is None:
         client = get_claude_client()
 
-    media_ids = kwargs.get("image_ids", [])
+    media_ids = kwargs.get("media_ids", kwargs.get("image_ids", []))
     succeeded = [mid for mid in media_ids if update_media_status(mid, "approved")]
     failed = [mid for mid in media_ids if mid not in succeeded]
     action_result = f"Successfully approved {len(succeeded)} item(s): {', '.join(succeeded)}."
@@ -332,7 +380,7 @@ def reject_media(
     if client is None:
         client = get_claude_client()
 
-    media_ids = kwargs.get("image_ids", [])
+    media_ids = kwargs.get("media_ids", kwargs.get("image_ids", []))
     succeeded = [mid for mid in media_ids if update_media_status(mid, "rejected")]
     failed = [mid for mid in media_ids if mid not in succeeded]
     action_result = f"Successfully rejected {len(succeeded)} item(s): {', '.join(succeeded)}."
@@ -407,23 +455,30 @@ def search_media_agent(
 # ---------------
 
 BRAND_UPDATE_SYSTEM_PROMPT = """
-    You are a brand information collection assistant.
+You are a brand field update assistant. Extract the exact change the user wants and return JSON.
 
-    Your job:
-    1. Analyze the user's message and conversation history.
-    2. Extract any brand information the user wants to update or provide.
-    3. Return ONLY a valid JSON object. No explanation, no markdown fences.
+Your job:
+1. Read the user's message and conversation history.
+2. Extract the field and new value being requested.
+3. Return ONLY valid JSON — no explanation, no markdown fences.
 
-    Extractable fields:
-    - brand_name, industry, mission, vision, values, tone, brand_voice,
-    communication_style, target_audience, primary_goal, default_email_signature
+Extractable fields:
+- brand_name, industry, mission, vision, values, tone, brand_voice,
+  communication_style, target_audience, primary_goal, default_email_signature
 
-    If no clear update is requested, return:
-    {"action": "clarify", "message": "<your clarifying question>"}
+Rules:
+- NEVER ask more than ONE clarifying question total across the conversation.
+- If the field and value are clear from the conversation history — update immediately, do not ask again.
+- If the user already confirmed (said "yes", "correct", "go ahead") — write the update now, stop asking.
+- Extract what you can from partial info — do not demand perfect phrasing.
+- If the update involves adding to an existing field (e.g. adding to target_audience), append the new value.
 
-    If updates are found, return:
-    {"action": "update", "changes": { "<field>": "<value>", ... }}
-    """
+If genuinely unclear what field or value to update (first message only):
+{"action": "clarify", "message": "<one short question>"}
+
+If update is clear OR user already confirmed:
+{"action": "update", "changes": { "<field>": "<value>", ... }}
+"""
 
 
 def brand_update_agent(
@@ -508,23 +563,43 @@ def brand_update_agent(
 # ---------------
 
 CAPTION_SYSTEM_PROMPT = """
-You are an expert social media content writer.
+You are an expert social media content writer for a marketing agency.
 
-Platform guidelines:
-- Instagram: Visual-first, aspirational, hook + body + CTA, under 150 words, 3-5 hashtags
+## Agency Understanding
+You write posts FOR a marketing agency. Two types:
+1. Agency promoting itself → use agency brand voice, talk as "we" (the agency)
+2. Agency showcasing work done FOR a client → write as the AGENCY talking about the client
+   Example: "We created this campaign for [Client] — here's what we built 🎨"
+   NOT: "At [Client], every bite tells a story..." (that's writing AS the client, which is wrong)
+
+NEVER write in the client's voice. Always write as the agency.
+NEVER ask the user to confirm which type — infer from context.
+
+## When to Write Immediately
+- Platform given → write now, no questions
+- "Another post for [platform]" → platform is known, write now
+- Client name or topic mentioned → write now, client name is enough
+- If you have ANY of: platform + topic, platform + client, or platform + context → write immediately
+- The client name is a nice detail but NOT required — if missing, write "our client" or infer from topic
+
+## Platform Guidelines
+- Instagram: Visual-first, hook + body + CTA, under 150 words, 3-5 hashtags
 - LinkedIn: Professional, thought leadership, 1-3 hashtags max
 - Facebook: Conversational, community-focused, medium length
 - TikTok: Fun, punchy, trend-aware, very short, 3-5 hashtags
 - Twitter/X: Under 280 chars, witty or bold, 1-2 hashtags max
 - YouTube: SEO-friendly description, detailed
 
-CRITICAL RULES:
-- Return ONLY the caption text itself. Nothing else.
-- No intro like "Here's your caption:"
-- No explanation after the caption
-- No bullet points about what you did
-- No "Would you like changes?" at the end
-- Start directly with the caption content
+## Critical Rules
+- Return ONLY the caption text. No intro, no explanation, no "Would you like changes?".
+- Start directly with the caption content.
+- Use Brand Context below — NEVER ask for brand name, tone, or voice.
+- If platform is missing AND cannot be inferred → ask for it ONCE, that is your ONLY allowed question.
+- Read full conversation history — use any platform, client, media title, or topic already mentioned.
+- NEVER ask for client name — if missing, write "our client" and move on.
+- If conversation history shows a media item (video/image title, ID, platform) → use it as the topic immediately.
+- NEVER ask "what is in the video/image" if the title or context is already in the conversation history.
+- A media title like "Brand intro reel for Instagram" is enough context — write the caption using it.
 """
 
 
@@ -537,27 +612,41 @@ def write_caption_agent(
     platform: str = None,
     topic: str = None,
     brand_chunks: list = None,
+    missing_brand_info: str = None,
+    routing_context: str = None,
     **kwargs
 ):
     if client is None:
         client = get_claude_client()
 
+    # Layer 1: Structured fields from Firestore brands doc (always loaded)
     brand_info = get_brand_info(brand_id) or {}
-    chunks_text = "\n\n---\n\n".join(
-        [f"{c.get('title', '')}\n{c.get('content', '')}" for c in (brand_chunks or [])]
-    ) or "No additional brand context."
+    brand_name = brand_info.get("brand_name", "")
 
-    brand_context = f"""
-Brand Name: {brand_info.get("brand_name")}
-Tone: {brand_info.get("tone")}
-Brand Voice: {brand_info.get("brand_voice")}
-Target Audience: {brand_info.get("target_audience")}
+    # Layer 2: Brand context embedding summary (always loaded)
+    brand_summary = get_latest_brand_context(brand_id) or ""
 
-Relevant Brand Book Sections:
-{chunks_text}
+    # Layer 3: On-demand — fetch specific missing fields from full brand JSON
+    extra_fields = {}
+    for field in ["tone", "brand_voice", "target_audience", "content_strategy", "social_media_guidelines"]:
+        if not brand_info.get(field):
+            val = get_brand_field(brand_id, field)
+            if val:
+                extra_fields[field] = val
+
+    brand_context = f"""Brand Name: {brand_name}
+Tone: {brand_info.get("tone") or extra_fields.get("tone", "")}
+Brand Voice: {brand_info.get("brand_voice") or extra_fields.get("brand_voice", "")}
+Target Audience: {brand_info.get("target_audience") or extra_fields.get("target_audience", "")}
+Mission: {brand_info.get("mission", "")}
+Values: {brand_info.get("values", "")}
+Content Strategy: {extra_fields.get("content_strategy", "")}
+Social Media Style: {extra_fields.get("social_media_guidelines", "")}
+{("\nBrand Context Summary:\n" + brand_summary) if brand_summary else ""}
+{("\nAdditional info from user: " + missing_brand_info) if missing_brand_info else ""}
 """
 
-    platform_note = f"Platform: {platform}" if platform else "Platform: not specified — infer from context."
+    platform_note = f"Platform: {platform}" if platform else "Platform: not specified — infer from context or ask once."
     topic_note = f"Topic/Subject: {topic}" if topic else ""
 
     messages = []
@@ -565,9 +654,15 @@ Relevant Brand Book Sections:
         messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": user_input})
 
+    routing_section = (
+        f"\n\n## Recent Context\n"
+        f"The following was just discussed — use it to understand what media or topic the user is referring to:\n"
+        f"{routing_context}"
+    ) if routing_context else ""
+
     response = client.messages.create(
         model=MODEL_SONNET,
-        system=CAPTION_SYSTEM_PROMPT + f"\n\n## Brand Context\n{brand_context}\n\n{platform_note}\n{topic_note}",
+        system=CAPTION_SYSTEM_PROMPT + f"\n\n## Brand Context\n{brand_context}\n\n{platform_note}\n{topic_note}" + routing_section,
         messages=messages,
         max_tokens=600
     )
@@ -577,3 +672,67 @@ Relevant Brand Book Sections:
             return block.text.strip()
 
     return "Could not generate caption."
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PASSIVE BRAND LEARNING
+# ─────────────────────────────────────────────────────────────────────────────
+
+def capture_brand_info_in_background(
+    user_input: str,
+    agent_question: str,
+    user_answer: str,
+    user_id: str,
+    brand_id: str
+):
+    """
+    Called silently by any agent when it asks the user a brand question and gets an answer.
+    Forwards the Q&A exchange to the onboarding agent in a background thread.
+    The onboarding agent merges the info into the active session and resets the 5-min timer.
+    The user sees nothing — their request was already completed before this runs.
+    """
+    import threading
+
+    def _run():
+        try:
+            from brand_onboarding_agent import BrandOnboardingAgent
+            import thread_manager
+
+            agent = BrandOnboardingAgent()
+            # Build a minimal exchange so the onboarding agent can extract the field
+            exchange = (
+                f"[Background capture — do not reply to the user, just extract and store] "
+                f"Agent asked: {agent_question} "
+                f"User answered: {user_answer}"
+            )
+            # Load onboarding thread and run extraction only — no reply needed
+            thread = thread_manager.load_thread(user_id, "brand_onboarding")
+            if thread.get("brand_id") and thread["brand_id"] != brand_id:
+                # Different brand — clear stale state
+                thread["messages"] = []
+                thread["collected_fields"] = {}
+                thread["summary"] = ""
+            thread["brand_id"] = brand_id
+
+            collected = thread.get("collected_fields", {})
+            agent._extract_and_store(
+                user_input=user_answer,
+                assistant_reply=agent_question,
+                collected=collected,
+                user_id=user_id,
+                brand_id=brand_id,
+                thread=thread
+            )
+            # Touch the thread timestamp so the finalizer's 5-min timer resets
+            thread_manager.touch_thread(user_id, "brand_onboarding")
+            from debug_hooks import log_passive_capture
+            log_passive_capture(
+                question=agent_question[:120],
+                answer=user_answer[:120],
+                brand_id=brand_id
+            )
+        except Exception as e:
+            from debug_hooks import log_error
+            log_error(f"Background capture failed: {e}", context=user_answer[:80])
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()

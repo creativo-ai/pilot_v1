@@ -14,7 +14,124 @@ from google.cloud import firestore, aiplatform
 import vertexai
 from vertexai.language_models import TextEmbeddingModel
 from llm_client import gemini_generate
+import json
 import thread_manager
+
+TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "brand_book_template.json")
+
+# Flat field → nested path mapping so collected flat fields populate the full template
+FIELD_MAP = {
+    # Metadata
+    "brand_name":                   ["metadata", "brand_name"],
+    "brand_id":                     ["metadata", "brand_id"],
+    "industry":                     ["metadata", "industry"],
+
+    # Brand Foundation
+    "mission":                      ["brand_foundation", "mission"],
+    "vision":                       ["brand_foundation", "vision"],
+    "purpose":                      ["brand_foundation", "purpose"],
+    "values":                       ["brand_foundation", "core_values"],
+    "core_values":                  ["brand_foundation", "core_values"],
+    "brand_promise":                ["brand_foundation", "brand_promise"],
+    "brand_story":                  ["brand_foundation", "brand_story", "origin_story"],
+    "origin_story":                 ["brand_foundation", "brand_story", "origin_story"],
+    "founder_story":                ["brand_foundation", "brand_story", "founder_story"],
+    "tagline":                      ["brand_foundation", "tagline"],
+    "slogan":                       ["brand_foundation", "slogan"],
+    "positioning":                  ["brand_foundation", "positioning_statement"],
+    "elevator_pitch":               ["brand_foundation", "value_proposition"],
+    "value_proposition":            ["brand_foundation", "value_proposition"],
+    "unique_selling_points":        ["brand_foundation", "unique_selling_points"],
+
+    # Brand Personality — use correct nested paths from template
+    "tone":                         ["brand_personality", "tone_of_voice", "primary_tone"],
+    "brand_voice":                  ["brand_personality", "brand_voice_description"],
+    "brand_archetype":              ["brand_personality", "archetype_primary"],
+    "personality_traits":           ["brand_personality", "personality_traits"],
+    "language_style":               ["brand_personality", "brand_human_character"],
+    "communication_style":          ["brand_personality", "brand_human_character"],
+
+    # Target Audience
+    "target_audience":              ["target_audience", "primary_audience", "description"],
+    "primary_audience_age":         ["target_audience", "primary_audience", "demographics", "age_range"],
+    "primary_audience_location":    ["target_audience", "primary_audience", "demographics", "location"],
+    "primary_audience_pain_points": ["target_audience", "primary_audience", "psychographics", "pain_points"],
+
+    # Market Positioning
+    "competitors":                  ["market_positioning", "competitive_landscape", "direct_competitors"],
+    "competitive_advantages":       ["market_positioning", "competitive_landscape", "competitive_advantages"],
+    "pricing_strategy":             ["market_positioning", "pricing_strategy"],
+
+    # Brand Messaging
+    "core_messages":                ["brand_messaging", "core_messages"],
+    "key_benefits":                 ["brand_messaging", "key_benefits"],
+    "primary_goal":                 ["brand_messaging", "primary_goal"],
+    "elevator_pitch_short":         ["brand_messaging", "elevator_pitch_short"],
+    "elevator_pitch_long":          ["brand_messaging", "elevator_pitch_long"],
+
+    # Visual Identity
+    "primary_color":                ["visual_identity", "color_palette", "primary_colors"],
+    "secondary_color":              ["visual_identity", "color_palette", "secondary_colors"],
+
+    # Content Strategy
+    "content_pillars":              ["content_strategy", "content_pillars"],
+    "posting_frequency":            ["content_strategy", "posting_frequency"],
+    "hashtags":                     ["content_strategy", "hashtag_strategy"],
+
+    # Email Branding
+    "email_greeting":               ["email_branding", "email_greeting_style"],
+    "email_closing":                ["email_branding", "email_closing_style"],
+    "default_email_signature":      ["email_branding", "default_signature"],
+
+    # Product / Service
+    "flagship_product":             ["product_or_service", "flagship_product"],
+    "offerings":                    ["product_or_service", "offerings"],
+
+    # Future Vision
+    "short_term_goals":             ["future_vision", "short_term_goals"],
+    "long_term_goals":              ["future_vision", "long_term_goals"],
+    "expansion_plans":              ["future_vision", "expansion_plans"],
+}
+
+def _set_nested(d: dict, path: list, value):
+    """Set a value at a nested path in dict d, creating intermediate dicts."""
+    for key in path[:-1]:
+        d = d.setdefault(key, {})
+    d[path[-1]] = value
+
+def _load_template() -> dict:
+    with open(TEMPLATE_PATH, "r") as f:
+        return json.load(f)
+
+def _load_existing_brand(brand_id: str) -> dict:
+    """
+    Load existing brand doc from Firestore into full template structure.
+    Always starts from the full template so no fields are ever missing.
+    Then overlays any existing saved values on top.
+    """
+    template = _load_template()
+    doc = db.collection("brands").document(brand_id).get()
+    if not doc.exists:
+        return template
+    existing = doc.to_dict() or {}
+    if "brand_foundation" in existing:
+        # Already nested — deep merge existing into template
+        _deep_merge_into(template, existing)
+    else:
+        # Flat doc — map flat fields into template paths
+        for flat_key, path in FIELD_MAP.items():
+            if flat_key in existing and existing[flat_key]:
+                _set_nested(template, path, existing[flat_key])
+    return template
+
+
+def _deep_merge_into(base: dict, overlay: dict):
+    """Merge overlay into base in place, only overwriting non-empty values."""
+    for k, v in overlay.items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            _deep_merge_into(base[k], v)
+        elif v not in (None, "", [], {}):
+            base[k] = v
 
 load_dotenv()
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "creativo-bf5c8-fc5f772a16e4.json"
@@ -76,34 +193,53 @@ def _run_once():
     for thread in stale:
         user_id = thread["user_id"]
         brand_id = thread.get("brand_id", "creativo")
-        print(f"\n🔔 Finalizer: stale onboarding detected — user={user_id}, brand={brand_id}")
         try:
             _finalize_thread(thread, user_id, brand_id)
             thread_manager.mark_finalized(user_id, "brand_onboarding")
-            print(f"✅ Onboarding finalized for {user_id}")
+            from debug_hooks import log_finalizer
+            log_finalizer(f"Brand book finalized for {brand_id}")
+            import sys
+            sys.stdout.write(f"\n\n[Brand book saved for {brand_id}]\n\n")
+            sys.stdout.flush()
         except Exception as e:
-            print(f"❌ Finalization failed for {user_id}: {e}")
+            from debug_hooks import log_error
+            log_error(f"Finalizer failed for {brand_id}: {e}")
 
 
 # ── Finalization logic ────────────────────────────────────────────────────────
 
 def _finalize_thread(thread: dict, user_id: str, brand_id: str):
-    structured_fields = thread.get("collected_fields", {})
+    collected_fields = thread.get("collected_fields", {})
     messages = thread.get("messages", [])
+    import datetime
 
-    # Write 1: Single full JSON document write to Firestore — one doc per brand.
-    # collected_fields holds everything accumulated in the thread during the session.
-    # No incremental writes happened during the session — this is the only DB write.
-    if structured_fields:
-        import datetime
-        structured_fields["metadata"] = structured_fields.get("metadata", {})
-        structured_fields["metadata"]["brand_id"] = brand_id
-        structured_fields["metadata"]["updated_at"] = str(datetime.date.today())
-        structured_fields["metadata"]["version"] = _get_next_brand_version(brand_id)
-        db.collection("brands").document(brand_id).set(structured_fields)
-        print(f"  📝 Wrote full brand JSON document to Firestore (brands/{brand_id})")
-    else:
-        print("  ⚠️  No structured fields collected, skipping Firestore write")
+    # Write 1: Load existing brand book (or template), merge all collected fields
+    # into the full nested structure, then write the complete document to Firestore.
+    brand_book = _load_existing_brand(brand_id)
+
+    # Map each flat collected field into the correct nested path
+    for flat_key, value in collected_fields.items():
+        if not value or value in ({}, [], ""):
+            continue
+        if flat_key in FIELD_MAP:
+            _set_nested(brand_book, FIELD_MAP[flat_key], value)
+        else:
+            # Unknown field — store it in a catch-all section
+            brand_book.setdefault("extra_fields", {})[flat_key] = value
+
+    # Update metadata
+    brand_book.setdefault("metadata", {})
+    brand_book["metadata"]["brand_id"] = brand_id
+    brand_book["metadata"]["brand_name"] = (
+        collected_fields.get("brand_name")
+        or brand_book["metadata"].get("brand_name", "")
+    )
+    brand_book["metadata"]["updated_at"] = str(datetime.date.today())
+    brand_book["metadata"]["version"] = _get_next_brand_version(brand_id)
+    brand_book["metadata"]["status"] = "active"
+
+    # Write full nested brand book to Firestore
+    db.collection("brands").document(brand_id).set(brand_book)
 
     # Write 2: Summarize the full conversation to extract rich free-form brand context.
     # Free-form info is never stored in variables — it lives only in conversation history.
@@ -113,7 +249,7 @@ def _finalize_thread(thread: dict, user_id: str, brand_id: str):
     source_text = conversation_text.strip()
 
     if not source_text:
-        print("  ⚠️  No context to embed, skipping Vertex AI write")
+        pass  # silent
         return
 
     brand_context_summary = gemini_generate(
@@ -135,7 +271,7 @@ def _finalize_thread(thread: dict, user_id: str, brand_id: str):
 
     vector = embedding_model.get_embeddings([brand_context_summary])[0].values
     _upsert_to_vertex(chunk_id, vector)
-    print(f"  🧠 Brand context {chunk_id} → Firestore + Vertex AI")
+    pass  # silent
 
 
 
@@ -144,9 +280,14 @@ def _get_next_brand_version(brand_id: str) -> str:
     """Increment the brand document version on each finalized session."""
     doc = db.collection("brands").document(brand_id).get()
     if doc.exists:
-        current = doc.to_dict().get("metadata", {}).get("version", "1.0.0")
+        d = doc.to_dict() or {}
+        # Check nested metadata first, then flat version field
+        current = (
+            d.get("metadata", {}).get("version")
+            or d.get("version", "1.0.0")
+        )
         try:
-            parts = current.split(".")
+            parts = str(current).split(".")
             parts[-1] = str(int(parts[-1]) + 1)
             return ".".join(parts)
         except Exception:

@@ -52,6 +52,7 @@ def save_thread(user_id: str, agent_name: str, thread: dict) -> None:
     """Persist the full thread document, updating last_active timestamp."""
     now = datetime.now(timezone.utc)
     thread["last_active"] = now
+    thread["status"] = "active"  # always reset to active on save — finalizer will re-run if needed
     if not thread.get("created_at"):
         thread["created_at"] = now
     thread["user_id"] = user_id
@@ -112,6 +113,32 @@ def mark_finalized(user_id: str, agent_name: str) -> None:
     ).update({"status": "finalized"})
 
 
+def touch_thread(user_id: str, agent_name: str) -> None:
+    """
+    Reset last_active to now without changing any other fields.
+    Called by background brand captures to reset the 5-min inactivity timer
+    so all brand info accumulates in one session before finalisation.
+    Also re-activates a finalized thread if new info arrives.
+    """
+    now = datetime.now(timezone.utc)
+    doc_ref = db.collection(COLLECTION).document(_doc_id(user_id, agent_name))
+    doc = doc_ref.get()
+    if doc.exists:
+        doc_ref.update({"last_active": now, "status": "active"})
+    else:
+        doc_ref.set({
+            "user_id": user_id,
+            "agent_name": agent_name,
+            "brand_id": None,
+            "messages": [],
+            "summary": "",
+            "collected_fields": {},
+            "last_active": now,
+            "status": "active",
+            "created_at": now,
+        })
+
+
 # ── Inactivity check ──────────────────────────────────────────────────────────
 
 def get_stale_onboarding_threads(inactivity_minutes: int = 5) -> list:
@@ -163,4 +190,3 @@ def get_last_active_agent(user_id: str) -> str | None:
             latest_agent = data.get("agent_name")
 
     return latest_agent
-
