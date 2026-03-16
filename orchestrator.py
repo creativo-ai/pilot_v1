@@ -39,7 +39,7 @@ TOOLS = [
     },
     {
         "name": "approve_media",
-        "description": "Approve one or more media by ID. IMPORTANT: Only approve media that have status=pending. If the user says 'first 2 pending' or similar, you MUST call list_pending_media or search_media with status=pending first to get the correct IDs, then approve only those.",
+        "description": "Approve one or more media items by their exact ID. Only call this after confirming the item is pending via search_media.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -50,7 +50,7 @@ TOOLS = [
     },
     {
         "name": "reject_media",
-        "description": "Reject one or more media by ID. IMPORTANT: If the user refers to media by position or description (e.g. 'last TikTok video'), you MUST call search_media first to get the correct IDs, then reject only those.",
+        "description": "Reject one or more media items by their exact ID. Only call this after confirming the item is pending via search_media.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -135,7 +135,10 @@ def build_system_prompt(brand_info: dict, brand_context_chunks: list) -> str:
     ) if brand_context_chunks else "No additional brand book context retrieved."
 
     return f"""
-        You are a helpful AI assistant for a marketing agency.
+        You are an internal media management tool for Creativo, a marketing agency.
+        You help Creativo's team members review, approve, reject, and search media assets belonging to their clients.
+        The active client brand is shown in the brand identity below — all media belongs to that client.
+        Be direct and efficient — you are an internal tool used by agency staff, not a customer-facing assistant.
 
         ## Brand Identity (always available)
         {brand_identity}
@@ -145,13 +148,18 @@ def build_system_prompt(brand_info: dict, brand_context_chunks: list) -> str:
 
         ## Media Rules
 
-        Only PENDING items can be approved or rejected. Status is final once set — approved and rejected items cannot be changed.
+        Only PENDING items can be approved or rejected. Status is final once set.
 
-        Before approving or rejecting anything, always verify the current status via search_media.
-        If a referenced item is not pending, ask the user to clarify — do not act on it.
-        If the user insists on changing a non-pending item, tell them it cannot be done.
+        When the user references media by position (first, second, last, etc.):
+        - If the previous response already listed media items, resolve the position from THAT list directly — do not call search_media again.
+        - Call search_media only if you do not already have the list in context.
+        - After resolving the position, check the item's status from the list. If it is not pending, ask the user to clarify before acting.
 
-        Ordinal references ("first", "last", "second") refer to position in the list last shown to the user, not to pending-only position.
+        When the user says "from the pending ones" or similar, re-resolve positions against only the pending subset.
+
+        Always include the item title AND platform in your approval/rejection summary so other agents can use that context.
+
+        If the user wants to use a rejected item on a different platform, explain that re-platforming requires uploading a new version.
 
         - Use search_docs only for platform how-to questions.
         """
@@ -183,9 +191,12 @@ def orchestrate(
             "\n\n## Previous Turn\n"
             f"The user previously said: {last_turn.get('user', '')}\n"
             f"You (or a peer agent) responded:\n{last_turn['response']}\n\n"
-            "Use this to resolve references in the current message. "
-            "Ordinal references like 'first 2', 'last one', 'the third' refer to the numbered "
-            "items in the response above — resolve them to exact IDs before calling any tool."
+            "Use this to resolve ALL references in the current message before calling any tool.\n"
+            "Ordinal references ('first', 'second', 'last', 'third') refer to the numbered position "
+            "in the list shown in the response above — NOT to pending-only position.\n"
+            "CRITICAL: If the previous response already listed the media items, resolve ordinals "
+            "from that list directly. Do NOT call search_media to re-fetch the list just to resolve ordinals.\n"
+            "Only call search_media if you genuinely need data not present in the previous response."
         )
     elif routing_context:
         system_prompt += (

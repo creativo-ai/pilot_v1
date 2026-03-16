@@ -19,12 +19,14 @@ class EmailAgent(BaseAgent):
         from llm_client import get_claude_client
         client = get_claude_client()
 
-        seeded_history = list(history)
-        if last_turn and last_turn.get("response"):
+        last_agent = last_turn.get("agent") if last_turn else None
+        if last_turn and last_turn.get("response") and last_agent != "email":
             seeded_history = [
                 {"role": "user",      "content": last_turn.get("user", "")},
                 {"role": "assistant", "content": last_turn["response"]}
-            ] + seeded_history
+            ]
+        else:
+            seeded_history = list(history)
 
         return write_email(
             user_input=user_input,
@@ -38,21 +40,36 @@ class EmailAgent(BaseAgent):
 
 class CaptionAgent(BaseAgent):
     name = "caption"
-    domain = "Writing social media captions or posts for any platform."
+    domain = "Writing social media captions or posts for any platform. Also handles questions about captions — what caption was written, reviewing a caption, or retrieving a previously written caption."
 
     def run(self, user_input, history, user_id, brand_id, routing_context=None, last_turn=None, **kwargs):
         from agents import write_caption_agent
         from llm_client import get_claude_client
         client = get_claude_client()
 
-        # Seed the previous turn's full response into history
-        # so the model sees exactly what was shown (media titles, IDs, statuses)
-        seeded_history = list(history)
-        if last_turn and last_turn.get("response"):
+        last_agent = last_turn.get("agent") if last_turn else None
+
+        # If arriving from a different agent, only use last_turn as context.
+        # Do NOT mix in stale caption thread history — it causes the model to
+        # pick up the last caption topic instead of the current one.
+        if last_turn and last_turn.get("response") and last_agent != "caption":
             seeded_history = [
                 {"role": "user",      "content": last_turn.get("user", "")},
                 {"role": "assistant", "content": last_turn["response"]}
-            ] + seeded_history
+            ]
+            # If coming from media agents, also inject routing_context so the
+            # caption agent has the full media list with platforms and titles,
+            # not just the terse approval summary
+            if routing_context and last_agent in ("media_approval", "media_search"):
+                seeded_history = [
+                    {"role": "user",      "content": f"[Media context: {routing_context}]"},
+                    {"role": "assistant", "content": "Understood, I have the full media context."}
+                ] + seeded_history
+        elif last_turn and last_turn.get("response") and last_agent == "caption":
+            # Continuing a caption conversation — use thread history
+            seeded_history = list(history)
+        else:
+            seeded_history = list(history)
 
         return write_caption_agent(
             user_input=user_input,
@@ -108,15 +125,23 @@ class MediaApprovalAgent(BaseAgent):
 
 class MediaSearchAgent(BaseAgent):
     name = "media_search"
-    domain = "Searching, listing, or filtering media history including images and videos."
+    domain = "Searching, listing, or filtering media items (images and videos) — their status, platform, dates, and IDs. Does NOT handle captions or written content."
 
-    def run(self, user_input, history, user_id, brand_id, routing_context=None, **kwargs):
+    def run(self, user_input, history, user_id, brand_id, routing_context=None, last_turn=None, **kwargs):
         from agents import search_media_agent
         from llm_client import get_claude_client
         client = get_claude_client()
+
+        seeded_history = list(history)
+        if last_turn and last_turn.get("response"):
+            seeded_history = [
+                {"role": "user",      "content": last_turn.get("user", "")},
+                {"role": "assistant", "content": last_turn["response"]}
+            ] + seeded_history
+
         return search_media_agent(
             user_input=user_input,
-            conversation_history=history,
+            conversation_history=seeded_history,
             user_id=user_id,
             brand_id=brand_id,
             client=client,
@@ -124,22 +149,8 @@ class MediaSearchAgent(BaseAgent):
         )
 
 
-class BrandUpdateAgent(BaseAgent):
-    name = "brand_update"
-    domain = "Updating or changing brand fields: tone, mission, vision, values, colors, voice, audience."
-
-    def run(self, user_input, history, user_id, brand_id, routing_context=None, **kwargs):
-        from agents import brand_update_agent
-        from llm_client import get_claude_client
-        client = get_claude_client()
-        return brand_update_agent(
-            user_input=user_input,
-            conversation_history=history,
-            user_id=user_id,
-            brand_id=brand_id,
-            client=client,
-            **kwargs
-        )
+# BrandUpdateAgent removed from routing — brand field updates are handled
+# internally by brand_onboarding and flushed on exit or inactivity.
 
 
 class DocsAgent(BaseAgent):
@@ -164,7 +175,7 @@ class BrandOnboardingAgent(BaseAgent):
     name = "brand_onboarding"
     domain = "All brand conversation: brand lookups, strategy, messaging, audience questions, expansion ideas, and new onboarding. Default agent for any brand or general conversation."
 
-    def run(self, user_input, history, user_id, brand_id, routing_context=None, **kwargs):
+    def run(self, user_input, history, user_id, brand_id, routing_context=None, last_turn=None, **kwargs):
         from brand_onboarding_agent import BrandOnboardingAgent as _Agent
         return _Agent().run(
             user_input=user_input,
@@ -183,7 +194,6 @@ AGENT_REGISTRY: list[BaseAgent] = [
     CaptionAgent(),
     MediaApprovalAgent(),
     MediaSearchAgent(),
-    BrandUpdateAgent(),
     DocsAgent(),
     BrandOnboardingAgent(),
     TalkAgent(),       # last — catches anything unmatched

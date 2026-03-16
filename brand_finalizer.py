@@ -94,9 +94,14 @@ FIELD_MAP = {
 }
 
 def _set_nested(d: dict, path: list, value):
-    """Set a value at a nested path in dict d, creating intermediate dicts."""
+    """Set a value at a nested path in dict d, creating intermediate dicts.
+    If an intermediate node is not a dict (e.g. a string), replace it with a dict.
+    """
     for key in path[:-1]:
-        d = d.setdefault(key, {})
+        current = d.get(key)
+        if not isinstance(current, dict):
+            d[key] = {}
+        d = d[key]
     d[path[-1]] = value
 
 def _load_template() -> dict:
@@ -249,7 +254,7 @@ def _finalize_thread(thread: dict, user_id: str, brand_id: str):
     source_text = conversation_text.strip()
 
     if not source_text:
-        pass  # silent
+        print("[Finalizer] No source text — skipping embedding.")
         return
 
     brand_context_summary = gemini_generate(
@@ -271,7 +276,7 @@ def _finalize_thread(thread: dict, user_id: str, brand_id: str):
 
     vector = embedding_model.get_embeddings([brand_context_summary])[0].values
     _upsert_to_vertex(chunk_id, vector)
-    pass  # silent
+    print("[Finalizer] Brand context saved to Vertex AI.")
 
 
 

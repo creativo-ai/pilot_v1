@@ -15,18 +15,19 @@ MODEL_HAIKU = "claude-haiku-4-5-20251001"  # docs/media formatting
 # ---------------
 
 EMAIL_SYSTEM_PROMPT = """
-You are an expert email writer for a marketing agency called {brand_name}.
+You are an expert email writer working inside Creativo, a marketing agency.
+Creativo's team uses you to draft emails on behalf of the agency or its clients.
 
-## Brand Context
+## Active Client Brand
 {agency_context}
 
 ## Rules
-- All brand info is provided above — use it directly, never ask the user for them unless they are not available.
+- The brand context above is for the CLIENT brand currently active — use it for tone, audience, and voice.
 - Write ONLY the email: subject line + body. No commentary before or after.
 - Do NOT write "Here's your email:" or "Would you like changes?".
 - Sign off using the brand signature provided.
-- Default target audience is the brand audience.
-- If you need a specific brand detail not in the context above, it will be injected — do not ask.
+- If writing on behalf of a client, use the client's voice and audience — not Creativo's.
+- If writing for Creativo itself (e.g. agency outreach), use Creativo's brand voice.
 - ONLY ask a question if the request has absolutely no topic, product, or subject at all.
 - If you have any topic or product from the conversation, write the email immediately.
 - Never ask the same question twice.
@@ -112,7 +113,7 @@ Sign Off: {brand_info.get("default_email_signature", f"Best regards,\n{brand_nam
 # ---------------
 
 TALK_SYSTEM_PROMPT = """
-You are a conversational AI assistant for {brand_name}.
+You are a helpful internal assistant for Creativo, a marketing agency. You help Creativo's team members with questions about their clients' brands, content strategy, and general tasks. The active client brand context is provided below.
 
 ## Brand Info
 {brand_context}
@@ -287,11 +288,11 @@ def search_docs_agent(
 # ---------------
 # Conversational Response Wrapper
 # ---------------
-CONVERSATIONAL_SYSTEM_PROMPT="""You are a warm, conversational AI assistant.
-    Communicate the action result naturally and conversationally.
+CONVERSATIONAL_SYSTEM_PROMPT="""You are a helpful internal assistant for Creativo, a marketing agency.
+    Communicate the action result naturally and conversationally to the Creativo team member.
     - Stay strictly aligned with what actually happened.
     - Be concise and friendly.
-    - Do NOT invent details.
+    - Do NOT invent details or suggest external platform changes.
     - Do NOT add suggestions or next steps unless the result explicitly mentions them.
     - Never output raw JSON."""
 
@@ -394,7 +395,7 @@ def reject_media(
 # ---------------
 
 MEDIA_SEARCH_SYSTEM_PROMPT = """
-You are a media search assistant.
+You are an internal media library tool for Creativo, a marketing agency. The media shown belongs to the client brand currently active in the system.
 Summarize the media results in a clear, friendly, conversational way.
 - Group by type (images vs videos) if both are present.
 - Include ID, description, platform, date, and status for each item.
@@ -454,108 +455,25 @@ def search_media_agent(
 # Brand Update Agent
 # ---------------
 
-BRAND_UPDATE_SYSTEM_PROMPT = """
-You are a brand field update assistant. Extract the exact change the user wants and return JSON.
-
-Your job:
-1. Read the user's message and conversation history.
-2. Extract the field and new value being requested.
-3. Return ONLY valid JSON — no explanation, no markdown fences.
-
-Extractable fields:
-- brand_name, industry, mission, vision, values, tone, brand_voice,
-  communication_style, target_audience, primary_goal, default_email_signature
-
-Rules:
-- NEVER ask more than ONE clarifying question total across the conversation.
-- If the field and value are clear from the conversation history — update immediately, do not ask again.
-- If the user already confirmed (said "yes", "correct", "go ahead") — write the update now, stop asking.
-- Extract what you can from partial info — do not demand perfect phrasing.
-- If the update involves adding to an existing field (e.g. adding to target_audience), append the new value.
-
-If genuinely unclear what field or value to update (first message only):
-{"action": "clarify", "message": "<one short question>"}
-
-If update is clear OR user already confirmed:
-{"action": "update", "changes": { "<field>": "<value>", ... }}
-"""
 
 
-def brand_update_agent(
-    user_input: str,
-    conversation_history: list,
-    user_id: str,
-    brand_id: str,
-    client=None,
-    **kwargs
-):
+def brand_update_agent(brand_id: str, changes: dict) -> bool:
+    """
+    Internal function — called only by flush_on_exit and flush_on_inactivity.
+    Writes collected brand field changes to Firestore using correct nested paths.
+    NOT a user-facing agent. Never called directly from routing.
 
-
-    if client is None:
-        client = get_claude_client()
-
-    # Build conversation history for Claude
-    messages = [{"role": m["role"], "content": m["content"]} for m in conversation_history]
-    messages.append({"role": "user", "content": user_input})
-
-    # Call Claude Haiku for structured JSON extraction
-    response = client.messages.create(
-        model=MODEL_HAIKU,
-        system=BRAND_UPDATE_SYSTEM_PROMPT,
-        messages=messages,
-        max_tokens=500
-    )
-
-    raw = ""
-    for block in response.content:
-        if getattr(block, "type", None) == "text":
-            raw += block.text
-
-    # Strip code fences if present
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-        raw = raw.strip()
-
-    try:
-        parsed = json.loads(raw)
-    except Exception:
-        return _conversational_response(
-            client,
-            user_input,
-            conversation_history,
-            "Could not understand the brand update request."
-        )
-
-    action = parsed.get("action")
-
-    if action == "clarify":
-        return parsed.get("message", "Could you clarify what you'd like to update?")
-
-    if action == "update":
-        changes = parsed.get("changes", {})
-        if not changes:
-            return _conversational_response(
-                client,
-                user_input,
-                conversation_history,
-                "No brand fields were found to update."
-            )
-
-        # Apply changes directly to Firestore brands doc
-        update_brand_info(brand_id, changes)
-        fields_updated = ", ".join(changes.keys())
-        action_result = f"Successfully updated brand fields: {fields_updated}. Changes will sync to brand book vectors within 5 minutes."
-
-        return _conversational_response(client, user_input, conversation_history, action_result)
-
-    # Fallback
-    return _conversational_response(
-        client,
-        user_input,
-        conversation_history,
-        "Could not process the brand update.")
+    Args:
+        brand_id: Firestore brand document ID
+        changes: dict of flat field keys and new values e.g. {"brand_name": "Zerox", "mission": "..."}
+    Returns:
+        True if successful
+    """
+    if not changes:
+        return False
+    update_brand_info(brand_id, changes)
+    print(f"[BrandUpdate] Fields written to Firestore: {list(changes.keys())}")
+    return True
 
 
 # ---------------
@@ -563,17 +481,21 @@ def brand_update_agent(
 # ---------------
 
 CAPTION_SYSTEM_PROMPT = """
-You are an expert social media content writer for a marketing agency.
+You are an expert social media content writer working inside Creativo, a marketing agency.
+Creativo's team uses you to write captions for their clients' social media posts.
 
-## Agency Understanding
-You write posts FOR a marketing agency. Two types:
-1. Agency promoting itself → use agency brand voice, talk as "we" (the agency)
-2. Agency showcasing work done FOR a client → write as the AGENCY talking about the client
-   Example: "We created this campaign for [Client] — here's what we built 🎨"
-   NOT: "At [Client], every bite tells a story..." (that's writing AS the client, which is wrong)
+## Your Role
+You write captions FOR Creativo's clients. Always write AS the client brand — in their voice, for their audience.
+Use the client brand context below (tone, values, audience, personality) to shape every caption.
 
-NEVER write in the client's voice. Always write as the agency.
-NEVER ask the user to confirm which type — infer from context.
+## Two Caption Types
+1. Client's own content (product, campaign, announcement) → write in the CLIENT's voice directly
+   Example client = burger restaurant: "Summer just got tastier 🍔☀️ Come try our new..."
+2. Creativo showcasing work FOR a client → write as Creativo talking about the work
+   Example: "We built a full summer campaign for our client in the F&B space 🎨"
+   Only use this type if the user explicitly says they're posting about agency work.
+
+Default to type 1 (client voice) unless told otherwise.
 
 ## When to Write Immediately
 - Platform given → write now, no questions
@@ -600,6 +522,9 @@ NEVER ask the user to confirm which type — infer from context.
 - If conversation history shows a media item (video/image title, ID, platform) → use it as the topic immediately.
 - NEVER ask "what is in the video/image" if the title or context is already in the conversation history.
 - A media title like "Brand intro reel for Instagram" is enough context — write the caption using it.
+- When the user references "the approved video/image", "the rejected one", or similar — find the MOST RECENTLY mentioned media item matching that description in conversation history. Use that specific item, not an older one.
+- When context shows a media item with a known platform (e.g. "LinkedIn Product Launch Graphic" on LinkedIn) — infer the platform from it. Never ask for the platform if it is already clear from the item's name or platform field in context.
+- If asked to retrieve or review a caption previously written, search conversation history first. If found, return it exactly. If not found, say: "I don't have a saved caption for that — would you like me to write one now?" Never invent a caption you did not write in this conversation.
 """
 
 
@@ -626,25 +551,40 @@ def write_caption_agent(
     # Layer 2: Brand context embedding summary (always loaded)
     brand_summary = get_latest_brand_context(brand_id) or ""
 
-    # Layer 3: On-demand — fetch specific missing fields from full brand JSON
+    # Layer 3: On-demand — fetch any missing fields from full brand JSON
+    fetch_fields = ["tone", "brand_voice", "target_audience", "vision",
+                    "content_strategy", "social_media_guidelines", "hashtags",
+                    "content_pillars", "brand_archetype"]
     extra_fields = {}
-    for field in ["tone", "brand_voice", "target_audience", "content_strategy", "social_media_guidelines"]:
+    for field in fetch_fields:
         if not brand_info.get(field):
             val = get_brand_field(brand_id, field)
             if val:
                 extra_fields[field] = val
 
-    brand_context = f"""Brand Name: {brand_name}
-Tone: {brand_info.get("tone") or extra_fields.get("tone", "")}
-Brand Voice: {brand_info.get("brand_voice") or extra_fields.get("brand_voice", "")}
-Target Audience: {brand_info.get("target_audience") or extra_fields.get("target_audience", "")}
-Mission: {brand_info.get("mission", "")}
-Values: {brand_info.get("values", "")}
-Content Strategy: {extra_fields.get("content_strategy", "")}
-Social Media Style: {extra_fields.get("social_media_guidelines", "")}
-{("\nBrand Context Summary:\n" + brand_summary) if brand_summary else ""}
-{("\nAdditional info from user: " + missing_brand_info) if missing_brand_info else ""}
-"""
+    def _get(key):
+        return brand_info.get(key) or extra_fields.get(key, "")
+
+    brand_context_parts = [
+        f"Brand Name: {brand_name}",
+        f"Mission: {_get('mission')}",
+        f"Vision: {_get('vision')}",
+        f"Values: {_get('values')}",
+        f"Target Audience: {_get('target_audience')}",
+        f"Tone: {_get('tone')}",
+        f"Brand Voice: {_get('brand_voice')}",
+        f"Brand Archetype: {_get('brand_archetype')}",
+        f"Content Pillars: {_get('content_pillars')}",
+        f"Content Strategy: {_get('content_strategy')}",
+        f"Social Media Style: {_get('social_media_guidelines')}",
+        f"Hashtag Strategy: {_get('hashtags')}",
+    ]
+    # Only include lines that have actual values
+    brand_context = "\n".join(line for line in brand_context_parts if not line.endswith(": ") and not line.endswith(": []") and not line.endswith(": None"))
+    if brand_summary:
+        brand_context += f"\n\nBrand Context Summary:\n{brand_summary}"
+    if missing_brand_info:
+        brand_context += f"\n\nAdditional info from user: {missing_brand_info}"
 
     platform_note = f"Platform: {platform}" if platform else "Platform: not specified — infer from context or ask once."
     topic_note = f"Topic/Subject: {topic}" if topic else ""

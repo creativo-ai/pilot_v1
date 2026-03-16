@@ -17,7 +17,7 @@ from debug_server import start as start_debug
 from debug_hooks import log_user_input, log_agent_selected, log_agent_response
 
 USER_ID  = "manar"
-BRAND_ID = "creativo"
+BRAND_ID = "maketing"
 
 # Short-term conversation window — last N turns kept in memory for routing context
 # This is NOT agent history — it's just for the classifier to understand context
@@ -27,6 +27,24 @@ MAX_WINDOW = 6
 _last_turn: dict = {}  # {user, response, agent} — full text, no truncation  # last 3 exchanges (user + assistant pairs)
 _current_brand = BRAND_ID  # tracks active brand to detect switches
 _routing_summary = None   # Gemini-generated summary of recent conversation
+
+
+def reset_session(user_id: str) -> None:
+    """
+    Clear all behavioral agent threads for this user (keeps brand_onboarding + brand doc).
+    Also resets in-memory session state: routing summary, last turn, routing window.
+    Call this at session start for returning users who need a clean slate.
+    """
+    global _routing_summary, _last_turn, ROUTING_WINDOW
+    from thread_manager import reset_user_behavior
+    cleared = reset_user_behavior(user_id)
+    _routing_summary = None
+    _last_turn = {}
+    ROUTING_WINDOW.clear()
+    if cleared:
+        print(f"[Session] Reset {len(cleared)} agent threads: {', '.join(cleared)}")
+    else:
+        print("[Session] No behavioral threads found to reset.")
 
 
 def get_agent_by_name(name: str):
@@ -90,7 +108,7 @@ def _flush_on_exit():
             thread_manager.mark_finalized(USER_ID, "brand_onboarding")
             print("\n[Brand book saved]")
     except Exception as e:
-        pass  # never block exit
+        print(f"[Flush error] {e}")  # never block exit
 
 
 def main():
