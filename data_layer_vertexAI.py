@@ -39,7 +39,23 @@ def get_brand_info(brand_id: str):
 
 
 def update_brand_info(brand_id: str, updates: dict):
-    db.collection("brands").document(brand_id).update(updates)
+    """
+    Update brand fields in Firestore using correct nested paths from FIELD_MAP.
+    Accepts flat keys (e.g. brand_name, mission) and maps them to the right path.
+    """
+    from brand_finalizer import FIELD_MAP
+    firestore_updates = {}
+    for flat_key, value in updates.items():
+        if flat_key in FIELD_MAP:
+            path = FIELD_MAP[flat_key]
+            # Firestore dot notation for nested fields
+            dot_path = ".".join(path)
+            firestore_updates[dot_path] = value
+        else:
+            # Unknown field — write flat as fallback
+            firestore_updates[flat_key] = value
+    db.collection("brands").document(brand_id).update(firestore_updates)
+    print(f"[BrandUpdate] Firestore updated: {list(firestore_updates.keys())}")
 
 
 # -------------------------------------------------
@@ -55,17 +71,18 @@ def get_media_history(user_id: str, brand_id: str):
     return [img.to_dict() for img in images]
 
 
-def update_media_status(image_id: str, new_status: str) -> bool:
-    try:
-        doc_ref = db.collection("images").document(image_id)
-        doc = doc_ref.get()
-        if not doc.exists:
-            return False
-        doc_ref.update({"status": new_status})
-        return True
-    except Exception as e:
-        print(f"[update_media_status] Failed for {image_id}: {e}")
-        return False
+def get_media_by_id(media_id: str) -> dict:
+    """Fetch a single media document by its ID.
+    All media (images and videos) are stored in the 'images' collection.
+    """
+    doc = db.collection("images").document(media_id).get()
+    if doc.exists:
+        return doc.to_dict()
+    return {}
+
+
+def update_media_status(image_id: str, new_status: str):
+    db.collection("images").document(image_id).update({"status": new_status})
 
 
 # -------------------------------------------------

@@ -17,7 +17,7 @@ from debug_server import start as start_debug
 from debug_hooks import log_user_input, log_agent_selected, log_agent_response
 
 USER_ID  = "manar"
-BRAND_ID = "maketing"
+BRAND_ID = "marketing"
 
 # Short-term conversation window — last N turns kept in memory for routing context
 # This is NOT agent history — it's just for the classifier to understand context
@@ -80,13 +80,28 @@ def _update_routing_summary(user_input: str, response: str, agent_name: str):
     recent = ""
     if _routing_summary:
         recent = f"Previous summary: {_routing_summary}\n\n"
-    recent += f"Latest turn (agent: {agent_name}):\nUser: {user_input[:200]}\nAssistant: {response[:200]}"
+    # For media agents: extract action+ID pairs (Approved: image_003, Rejected: video_001)
+    import re as _re
+    media_action_str = ""
+    if agent_name in ("media_approval", "media_search"):
+        approved = _re.findall(r'[Aa]pproved[^\w]*(image_\d+|video_\d+)', response)
+        rejected = _re.findall(r'[Rr]ejected[^\w]*(image_\d+|video_\d+)', response)
+        pending  = _re.findall(r'[Pp]ending[^\w]*(image_\d+|video_\d+)', response)
+        parts = []
+        if approved: parts.append("Approved: " + ", ".join(approved))
+        if rejected: parts.append("Rejected: " + ", ".join(rejected))
+        if pending:  parts.append("Pending: "  + ", ".join(pending))
+        if parts:
+            media_action_str = " | " + " | ".join(parts)
+
+    recent += f"Latest turn (agent: {agent_name}):\nUser: {user_input[:200]}\nAssistant: {response[:300]}{media_action_str}"
     try:
         _routing_summary = gemini_generate(
             prompt=recent,
             system=(
                 "You are summarizing a conversation for routing context. "
                 "Write 2-3 sentences capturing what was just discussed and what the user is trying to do. "
+                "If media actions are present (Approved/Rejected/Pending with IDs), always include them exactly as-is — e.g. 'Approved: image_003 | Rejected: video_001'. "
                 "Always end with: 'Last active agent: <agent_name>.'"
             )
         )

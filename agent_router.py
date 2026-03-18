@@ -53,23 +53,52 @@ class CaptionAgent(BaseAgent):
         # Do NOT mix in stale caption thread history — it causes the model to
         # pick up the last caption topic instead of the current one.
         if last_turn and last_turn.get("response") and last_agent != "caption":
+            # Arriving from another agent — seed last_turn as context
             seeded_history = [
                 {"role": "user",      "content": last_turn.get("user", "")},
                 {"role": "assistant", "content": last_turn["response"]}
             ]
-            # If coming from media agents, also inject routing_context so the
-            # caption agent has the full media list with platforms and titles,
-            # not just the terse approval summary
+            # If coming from media agents, prepend full media list for richer context
             if routing_context and last_agent in ("media_approval", "media_search"):
                 seeded_history = [
                     {"role": "user",      "content": f"[Media context: {routing_context}]"},
                     {"role": "assistant", "content": "Understood, I have the full media context."}
                 ] + seeded_history
         elif last_turn and last_turn.get("response") and last_agent == "caption":
-            # Continuing a caption conversation — use thread history
             seeded_history = list(history)
+            if routing_context and ("image" in routing_context.lower() or "video" in routing_context.lower()):
+                seeded_history = [
+                    {"role": "user",      "content": f"[Media context: {routing_context}]"},
+                    {"role": "assistant", "content": "Understood, I have the full media context."}
+                ] + seeded_history
         else:
             seeded_history = list(history)
+
+        # Always pass last_turn response as routing_context to caption agent
+        # so it can reference recently approved/searched media items
+        media_routing = None
+        if last_turn and last_turn.get("response") and last_agent in ("media_approval", "media_search"):
+            media_routing = last_turn["response"]
+        elif routing_context:
+            media_routing = routing_context
+
+        # Prepend a brand reminder as the first assistant turn so the model
+        # cannot mistake old brand names from history for the current brand
+        from data_layer_vertexAI import get_brand_info as _gbi
+        _bi = _gbi(brand_id) or {}
+        _current_brand_name = (
+            _bi.get("metadata", {}).get("brand_name") or
+            _bi.get("brand_name") or
+            brand_id
+        )
+        print(f"[Caption Router] brand_name injected: '{_current_brand_name}'")
+        if _current_brand_name:
+            # Append brand reminder as the LAST assistant message before user input
+            # so it is the most recent context the model reads — highest priority
+            seeded_history = seeded_history + [
+                {"role": "user", "content": "[IMPORTANT] What brand name must I use in this caption?"},
+                {"role": "assistant", "content": f"[IMPORTANT] I must use '{_current_brand_name}' — this is the current brand name from the brand profile. I will not use any other name from history."}
+            ]
 
         return write_caption_agent(
             user_input=user_input,
@@ -77,6 +106,7 @@ class CaptionAgent(BaseAgent):
             user_id=user_id,
             brand_id=brand_id,
             client=client,
+            routing_context=media_routing,
             **kwargs
         )
 

@@ -153,7 +153,11 @@ def build_system_prompt(brand_info: dict, brand_context_chunks: list) -> str:
         When the user references media by position (first, second, last, etc.):
         - If the previous response already listed media items, resolve the position from THAT list directly — do not call search_media again.
         - Call search_media only if you do not already have the list in context.
-        - After resolving the position, check the item's status from the list. If it is not pending, ask the user to clarify before acting.
+        - After resolving the position, check the item's status from the list.
+        - If the resolved item is NOT pending (already approved or rejected), do NOT act on it.
+          Instead ask: "The last image (image_XXX - [title]) is already [status]. Did you mean the last PENDING image (image_YYY - [title])?"
+          Wait for user confirmation before taking any action.
+        - Only act immediately when the resolved item is clearly pending.
 
         When the user says "from the pending ones" or similar, re-resolve positions against only the pending subset.
 

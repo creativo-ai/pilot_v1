@@ -33,6 +33,11 @@ def get_nested(data, *keys, default=""):
 # ---------------
 
 EMAIL_SYSTEM_PROMPT = """
+## Information priority (applies on conflict only)
+1. Active Client Brand Context below → source of truth for brand name, tone, audience, values
+2. Conversation history → continuity and context
+When no conflict exists, combine all sources for richest output.
+
 You are an expert email writer working inside Creativo, a marketing agency.
 Creativo's team uses you to draft emails on behalf of the agency or its clients.
 
@@ -70,6 +75,8 @@ def write_email(
 
     # Layer 1: Structured fields from Firestore brands doc (always loaded — fast, small)
     brand_info = get_brand_info(brand_id) or {}
+
+
     brand_name = get_nested(brand_info, "metadata", "brand_name")
     tone = get_nested(brand_info, "brand_personality", "tone_of_voice", "primary_tone")
     brand_voice = get_nested(brand_info, "brand_personality", "brand_voice_description")
@@ -502,25 +509,42 @@ def brand_update_agent(brand_id: str, changes: dict) -> bool:
 # ---------------
 
 CAPTION_SYSTEM_PROMPT = """
-You write social media captions for {agency_name}.
+You are a social media writer for {agency_name}.
+Write every caption immediately. Never ask clarifying questions unless the platform is missing.
 
-The brand context below is {agency_name}'s profile. Every caption you write is FOR {agency_name} — posted on their channels, in their voice, to their audience.
+## Priority order — always follow this
+1. BRAND FACTS section below: Agency Name, Industry, Mission, Vision, Values, Tone, Audience
+   → These are the source of truth. Always use them. They override everything else.
+2. Additional Brand Context section: background narrative — use only to add depth, never to override facts above
+3. Conversation history: for continuity only — never use it to determine brand name, industry, or audience
 
-NEVER ask who the caption is for. It is always for {agency_name}.
-NEVER ask for a client name. If the user mentions a topic like "pharmacy" or "burger restaurant", write a post about that topic IN {agency_name}'s voice — sharing tips, insights, or expertise about that industry for their SMB audience.
+If history or brand context narrative contradicts the BRAND FACTS, ignore the contradiction and use BRAND FACTS.
 
-Write immediately when you have a platform and topic. No questions, no clarifications.
-If platform is missing and cannot be inferred from context → ask for it ONCE. That is the only question allowed.
+## How to write
+Read Industry and Audience from BRAND FACTS to understand what kind of content to write.
+Write a post about the given topic in the brand's voice, for the brand's audience, using the brand name from BRAND FACTS.
 
-Return ONLY the caption text. No preamble, no explanations. Start directly with the content.
+When platform is missing → ask for it once. That is the only question you may ask.
 
-Platform style:
+## Format
+Return ONLY the caption. No preamble. Start directly with the content.
+Always use the brand name from BRAND FACTS in the post or hashtags.
+
+## Platform style
 - Instagram: Hook + value + CTA, under 150 words, 3-5 hashtags, emojis welcome
 - LinkedIn: Professional, insight-driven, 1-3 hashtags, minimal emojis
 - Facebook: Conversational, community feel, medium length
 - TikTok: Very short, punchy, 3-5 hashtags
 - Twitter/X: Under 280 chars, bold, 1-2 hashtags
 """
+
+
+
+
+
+
+
+
 
 
 
@@ -545,6 +569,8 @@ def write_caption_agent(
 
     brand_info = get_brand_info(brand_id) or {}
     brand_summary = get_latest_brand_context(brand_id) or ""
+
+    print(f"[Caption] brand_id={brand_id}, metadata.brand_name={brand_info.get('metadata',{}).get('brand_name','?')}, summary_len={len(brand_summary)}")
 
     def _read(brand_info, *paths):
         """
@@ -582,6 +608,7 @@ def write_caption_agent(
 
     # Read each field trying multiple possible paths (nested → flat fallback)
     brand_name    = _read(brand_info, ["metadata", "brand_name"], ["brand_name"])
+    industry      = _read(brand_info, ["metadata", "industry"], ["industry"])
     mission       = _read(brand_info, ["brand_foundation", "mission"], ["mission"])
     vision        = _read(brand_info, ["brand_foundation", "vision"], ["vision"])
     values        = _read(brand_info, ["brand_foundation", "core_values"], ["values"], ["core_values"])
@@ -601,6 +628,7 @@ def write_caption_agent(
     # Build brand context — only include fields that have actual values
     parts = []
     if brand_name:       parts.append(f"Agency Name: {brand_name}")
+    if industry:         parts.append(f"Industry: {industry}")
     if mission:          parts.append(f"Mission: {mission}")
     if vision:           parts.append(f"Vision: {vision}")
     if values:           parts.append(f"Values: {values}")
@@ -612,7 +640,7 @@ def write_caption_agent(
     if positioning:      parts.append(f"Positioning: {positioning}")
     if content_pill:     parts.append(f"Content Pillars: {content_pill}")
     if hashtags:         parts.append(f"Hashtag Strategy: {hashtags}")
-    if brand_summary:    parts.append(f"\nBrand Summary:\n{brand_summary}")
+    if brand_summary:    parts.append(f"\nAdditional Brand Context (supplementary only — structured fields above take priority):\n{brand_summary}")
     if missing_brand_info: parts.append(f"Additional info: {missing_brand_info}")
 
     brand_context = "\n".join(parts) if parts else "No brand context available yet."
@@ -623,10 +651,33 @@ def write_caption_agent(
         messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": user_input})
 
+    # Extract media IDs from routing context and fetch their details from Firestore
+    import re as _re
+    media_detail_section = ""
+    if routing_context:
+        media_ids = list(set(_re.findall(r'\b(image_\d+|video_\d+)\b', routing_context)))
+        if media_ids:
+            try:
+                from data_layer_vertexAI import get_media_by_id
+                lines = []
+                for mid in media_ids:
+                    media = get_media_by_id(mid)
+                    if media:
+                        lines.append(
+                            f"- {mid}: {media.get('title', 'unknown')} | "
+                            f"Platform: {media.get('platform', 'unknown')} | "
+                            f"Status: {media.get('status', 'unknown')} | "
+                            f"Description: {media.get('description', 'n/a')}"
+                        )
+                if lines:
+                    media_detail_section = "\n\n## Media Details (fetched from library)\n" + "\n".join(lines)
+                    print(f"[Caption] fetched media details for: {media_ids}")
+            except Exception as e:
+                print(f"[Caption] media fetch error: {e}")
+
     routing_section = (
-        f"\n\n## Recent Context\n"
-        f"The following was just discussed — use it to understand what the user is referring to:\n"
-        f"{routing_context}"
+        f"\n\n## Recent Context\n{routing_context}"
+        + media_detail_section
     ) if routing_context else ""
 
     # Fill agency_name placeholder in system prompt dynamically
@@ -634,11 +685,12 @@ def write_caption_agent(
 
     system = (
         filled_prompt
-        + f"\n\n## Agency Brand Context\n{brand_context}"
+        + f"\n\n## BRAND FACTS (Firestore — source of truth on conflict)\n{brand_context}"
         + f"\n\nPlatform: {platform or 'infer from context or ask once'}"
         + (f"\nTopic: {topic}" if topic else "")
         + routing_section
     )
+
 
     response = client.messages.create(
         model=MODEL_SONNET,
