@@ -138,13 +138,13 @@ def _deep_merge_into(base: dict, overlay: dict):
         elif v not in (None, "", [], {}):
             base[k] = v
 
-load_dotenv()
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "creativo-bf5c8-fc5f772a16e4.json"
-
 PROJECT_ID = "creativo-bf5c8"
 REGION = "us-central1"
 INACTIVITY_MINUTES = 5
-POLL_INTERVAL_SECONDS = 60  # check every minute, finalize if inactive > 5 min
+POLL_INTERVAL_SECONDS = 60
+
+load_dotenv()
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "creativo-bf5c8-fc5f772a16e4.json"
 
 db = firestore.Client(project=PROJECT_ID, database="agent-orchestration")
 vertexai.init(project=PROJECT_ID, location=REGION)
@@ -197,7 +197,7 @@ def _run_once():
         return
     for thread in stale:
         user_id = thread["user_id"]
-        brand_id = thread.get("brand_id", "creativo")
+        brand_id = thread.get("brand_id") or os.getenv("DEFAULT_BRAND_ID", "marketing")
         try:
             _finalize_thread(thread, user_id, brand_id)
             thread_manager.mark_finalized(user_id, "brand_onboarding")
@@ -298,6 +298,8 @@ def _get_next_brand_version(brand_id: str) -> str:
         except Exception:
             return "1.0.1"
     return "1.0.0"
+
+
 def _get_next_context_version(brand_id: str) -> str:
     docs = list(
         db.collection("brand_context")

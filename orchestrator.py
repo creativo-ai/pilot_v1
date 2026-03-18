@@ -13,12 +13,6 @@ from agents import (
     write_caption_agent
 )
 
-# Agents that perform DB actions — no streaming, return instantly
-ACTION_AGENTS = {"list_pending_media", "approve_media", "reject_media", "search_media", "update_brand"}
-
-# Agents that generate text — support streaming
-STREAMING_AGENTS = {"write_email", "write_caption", "search_docs", "talk"}
-
 TOOLS = [
     {
         "name": "write_email",
@@ -39,22 +33,22 @@ TOOLS = [
     },
     {
         "name": "approve_media",
-        "description": "Approve one or more media items by their exact ID. Only call this after confirming the item is pending via search_media.",
+        "description": "Approve one or more media items by their resolved IDs. Pass all resolved IDs — the tool validates status internally and only actions pending items.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "media_ids": {"type": "array", "items": {"type": "string"}, "description": "List of media IDs to approve — must be pending status only"}
+                "media_ids": {"type": "array", "items": {"type": "string"}, "description": "List of resolved media IDs to approve"}
             },
             "required": ["media_ids"]
         }
     },
     {
         "name": "reject_media",
-        "description": "Reject one or more media items by their exact ID. Only call this after confirming the item is pending via search_media.",
+        "description": "Reject one or more media items by their resolved IDs. Pass all resolved IDs — the tool validates status internally and only actions pending items.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "media_ids": {"type": "array", "items": {"type": "string"}, "description": "List of media IDs to reject"}
+                "media_ids": {"type": "array", "items": {"type": "string"}, "description": "List of resolved media IDs to reject"}
             },
             "required": ["media_ids"]
         }
@@ -120,14 +114,33 @@ AVAILABLE_AGENTS = {
 }
 
 
+def _nested_get(d: dict, *paths):
+    """Try nested path first, then flat key fallback."""
+    for path in paths:
+        if isinstance(path, str):
+            path = [path]
+        node = d
+        for key in path:
+            if isinstance(node, dict):
+                node = node.get(key, {})
+            else:
+                node = {}
+                break
+        if isinstance(node, str) and node.strip():
+            return node.strip()
+        if isinstance(node, list) and node:
+            return ", ".join(str(v) for v in node if v)
+    return ""
+
+
 def build_system_prompt(brand_info: dict, brand_context_chunks: list) -> str:
     brand_identity = json.dumps({
-        "brand_name": brand_info.get("brand_name"),
-        "tone": brand_info.get("tone"),
-        "mission": brand_info.get("mission"),
-        "vision": brand_info.get("vision"),
-        "values": brand_info.get("values"),
-        "target_audience": brand_info.get("target_audience")
+        "brand_name": _nested_get(brand_info, ["metadata", "brand_name"], ["brand_name"]),
+        "tone":       _nested_get(brand_info, ["brand_personality", "tone_of_voice", "primary_tone"], ["tone"]),
+        "mission":    _nested_get(brand_info, ["brand_foundation", "mission"], ["mission"]),
+        "vision":     _nested_get(brand_info, ["brand_foundation", "vision"], ["vision"]),
+        "values":     _nested_get(brand_info, ["brand_foundation", "core_values"], ["values"]),
+        "target_audience": _nested_get(brand_info, ["target_audience", "primary_audience", "description"], ["target_audience"]),
     }, indent=2)
 
     brand_book_context = "\n\n---\n\n".join(
@@ -148,22 +161,41 @@ def build_system_prompt(brand_info: dict, brand_context_chunks: list) -> str:
 
         ## Media Rules
 
-        Only PENDING items can be approved or rejected. Status is final once set.
+        WORKFLOW — always follow this exact order:
 
-        When the user references media by position (first, second, last, etc.):
-        - If the previous response already listed media items, resolve the position from THAT list directly — do not call search_media again.
-        - Call search_media only if you do not already have the list in context.
-        - After resolving the position, check the item's status from the list.
-        - If the resolved item is NOT pending (already approved or rejected), do NOT act on it.
-          Instead ask: "The last image (image_XXX - [title]) is already [status]. Did you mean the last PENDING image (image_YYY - [title])?"
-          Wait for user confirmation before taking any action.
-        - Only act immediately when the resolved item is clearly pending.
+        STEP 1 — Call search_media to resolve references.
+        Always call search_media first to get the current media list from Firestore.
+        Use the results to resolve positional references (first, last, third, etc.).
 
-        When the user says "from the pending ones" or similar, re-resolve positions against only the pending subset.
+        STEP 2 — Resolve positions from search_media results.
+        Map "first image" → first image in results, "last video" → last video in results.
+        When user says "last 2 videos" → find the last 2 videos in the results list.
+        Use ONLY the search_media results for this — never conversation history.
 
-        Always include the item title AND platform in your approval/rejection summary so other agents can use that context.
+        STEP 3 — Call approve_media or reject_media with the resolved IDs.
+        Pass ALL resolved IDs directly to the tool — do NOT pre-filter by status.
+        The tool functions validate status internally and only act on pending items.
+        They return exactly what happened: which items were actioned, which were skipped.
 
-        If the user wants to use a rejected item on a different platform, explain that re-platforming requires uploading a new version.
+        STEP 4 — Report the tool result to the user.
+        Report exactly what the tool returned. Do not add your own status judgements.
+        The tool result is ground truth — trust it completely.
+
+        POSITIONAL RESOLUTION RULES:
+        - "first image" → index 0 of images in search_media results
+        - "last video" → last video in search_media results
+        - "last 2 videos" → last 2 videos in search_media results
+        - "third image" → index 2 of images in search_media results
+        - When user requests action on multiple items, resolve ALL positions first,
+          then call the appropriate tool(s) with all resolved IDs at once.
+
+        NEVER pre-check status before calling tools — the tools do this internally.
+        NEVER skip calling a tool because you think the item is not pending — let the tool decide.
+        NEVER report a status based on conversation history or session context.
+
+        Always include item title AND platform in your approval/rejection summary.
+        Never mention Firestore, search_media, internal tools, or internal steps to the user.
+        Respond only with the outcome — not how you got there.
 
         - Use search_docs only for platform how-to questions.
         """
@@ -174,7 +206,6 @@ def orchestrate(
     conversation_history: list,
     user_id: str,
     brand_id: str,
-    stream: bool = False,
     routing_context: str = None,
     last_turn: dict = None,
     **kwargs
@@ -189,20 +220,7 @@ def orchestrate(
     brand_chunks = search_brand_book(brand_id=brand_id, query=user_input.strip(), top_k=3)
     system_prompt = build_system_prompt(brand_info, brand_chunks)
 
-    # Inject routing context so agent knows what was just discussed (e.g. which media was listed)
-    if last_turn and last_turn.get("response"):
-        system_prompt += (
-            "\n\n## Previous Turn\n"
-            f"The user previously said: {last_turn.get('user', '')}\n"
-            f"You (or a peer agent) responded:\n{last_turn['response']}\n\n"
-            "Use this to resolve ALL references in the current message before calling any tool.\n"
-            "Ordinal references ('first', 'second', 'last', 'third') refer to the numbered position "
-            "in the list shown in the response above — NOT to pending-only position.\n"
-            "CRITICAL: If the previous response already listed the media items, resolve ordinals "
-            "from that list directly. Do NOT call search_media to re-fetch the list just to resolve ordinals.\n"
-            "Only call search_media if you genuinely need data not present in the previous response."
-        )
-    elif routing_context:
+    if routing_context:
         system_prompt += (
             "\n\n## Recent Conversation Context\n"
             + routing_context
@@ -211,19 +229,42 @@ def orchestrate(
     messages = []
     for msg in conversation_history:
         messages.append({"role": msg["role"], "content": msg["content"]})
+
+    # Inject last_turn only from media agents for item name/position resolution.
+    # Strip ALL status indicators — search_media results are the only status source.
+    if last_turn and last_turn.get("response") and last_turn.get("agent") in ("media_search", "media_approval"):
+        import re as _re
+        print(f"[Orchestrator] last_turn agent={last_turn.get('agent','?')}, response_len={len(last_turn['response'])}")
+        sanitised = last_turn["response"]
+        sanitised = _re.sub(r"[✅❌⏳]", "", sanitised)
+        sanitised = _re.sub(r"Status:\s*\w+", "", sanitised, flags=_re.IGNORECASE)
+        sanitised = _re.sub(r"\b(Approved|Rejected|Pending)\b", "", sanitised, flags=_re.IGNORECASE)
+        messages.append({"role": "user", "content": last_turn.get("user", "")})
+        messages.append({"role": "assistant", "content": sanitised})
+
     messages.append({"role": "user", "content": user_input})
 
     MAX_STEPS = 5
     step = 0
     last_text_response = None
+    actioned_approved = []   # IDs actually approved this turn — ground truth from tool calls
+    actioned_rejected = []   # IDs actually rejected this turn — ground truth from tool calls
+
+    # Force a tool call on step 0 for any media-related request
+    # so Claude always hits Firestore — never reads status from conversation history
+    _media_keywords = ("approve", "reject", "accept", "decline", "last", "first",
+                       "pending", "image", "video", "media", "status")
+    _needs_tool = any(k in user_input.lower() for k in _media_keywords)
 
     while step < MAX_STEPS:
+        # Force any tool use on first step for media requests
+        tool_choice = {"type": "any"} if (_needs_tool and step == 0) else {"type": "auto"}
         response = client.messages.create(
             model="claude-sonnet-4-6",
             system=system_prompt,
             messages=messages,
             tools=TOOLS,
-            tool_choice={"type": "auto"},
+            tool_choice=tool_choice,
             max_tokens=1000
         )
 
@@ -234,8 +275,6 @@ def orchestrate(
         if response.stop_reason == "end_turn":
             for block in response.content:
                 if getattr(block, "type", None) == "text":
-                    if stream:
-                        return _stream_text(block.text.strip())
                     return block.text.strip()
             return last_text_response or "Done."
 
@@ -252,7 +291,6 @@ def orchestrate(
 
                     agent_fn = AVAILABLE_AGENTS.get(tool_name)
                     if agent_fn:
-                        # Stream text agents on final call, not intermediate steps
                         result = agent_fn(
                             user_input=user_input,
                             conversation_history=conversation_history,
@@ -263,6 +301,18 @@ def orchestrate(
                             **tool_args
                         )
                         last_text_response = result
+                        # Track actually actioned IDs from agent result — skips non-pending items
+                        # Result format: "Approved: id1, id2 | Skipped: id3 | ..."
+                        if tool_name in ("approve_media", "reject_media") and isinstance(result, str):
+                            import re as _re2
+                            if tool_name == "approve_media":
+                                _ids = _re2.findall(r'Approved:\s*((?:image_\d+|video_\d+)(?:,\s*(?:image_\d+|video_\d+))*)', result)
+                                for group in _ids:
+                                    actioned_approved.extend([i.strip() for i in group.split(",")])
+                            elif tool_name == "reject_media":
+                                _ids = _re2.findall(r'Rejected:\s*((?:image_\d+|video_\d+)(?:,\s*(?:image_\d+|video_\d+))*)', result)
+                                for group in _ids:
+                                    actioned_rejected.extend([i.strip() for i in group.split(",")])
                     else:
                         result = f"Tool '{tool_name}' not found."
 
@@ -275,14 +325,11 @@ def orchestrate(
             messages.append({"role": "user", "content": tool_results})
             continue
 
+    # Return actioned IDs alongside response so main.py can persist exact session state
+    if actioned_approved or actioned_rejected:
+        return {
+            "response": last_text_response or "Done.",
+            "approved": actioned_approved,
+            "rejected": actioned_rejected
+        }
     return last_text_response or "Could not complete the request."
-
-
-def _stream_text(text: str):
-    """Simulate streaming by yielding the final text as a generator."""
-    import time
-    for char in text:
-        print(char, end="", flush=True)
-        time.sleep(0.01)
-    print()
-    return text

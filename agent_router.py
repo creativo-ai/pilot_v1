@@ -5,7 +5,7 @@ Each agent class wraps the corresponding function from agents.py.
 """
 
 from agent_base import BaseAgent
-from llm_client import gemini_generate
+from llm_client import gemini_generate, get_claude_client
 
 
 # ── Agent classes ─────────────────────────────────────────────────────────────
@@ -16,7 +16,6 @@ class EmailAgent(BaseAgent):
 
     def run(self, user_input, history, user_id, brand_id, routing_context=None, last_turn=None, **kwargs):
         from agents import write_email
-        from llm_client import get_claude_client
         client = get_claude_client()
 
         last_agent = last_turn.get("agent") if last_turn else None
@@ -44,7 +43,6 @@ class CaptionAgent(BaseAgent):
 
     def run(self, user_input, history, user_id, brand_id, routing_context=None, last_turn=None, **kwargs):
         from agents import write_caption_agent
-        from llm_client import get_claude_client
         client = get_claude_client()
 
         last_agent = last_turn.get("agent") if last_turn else None
@@ -74,12 +72,12 @@ class CaptionAgent(BaseAgent):
         else:
             seeded_history = list(history)
 
-        # Always pass last_turn response as routing_context to caption agent
-        # so it can reference recently approved/searched media items
+        # Build media_routing from last_turn if it was a media agent,
+        # OR from routing_context if it contains a media action summary (persists across turns)
         media_routing = None
         if last_turn and last_turn.get("response") and last_agent in ("media_approval", "media_search"):
             media_routing = last_turn["response"]
-        elif routing_context:
+        elif routing_context and any(k in routing_context for k in ("Approved:", "Rejected:", "Pending:", "media_approval", "media_search")):
             media_routing = routing_context
 
         # Prepend a brand reminder as the first assistant turn so the model
@@ -117,7 +115,6 @@ class TalkAgent(BaseAgent):
 
     def run(self, user_input, history, user_id, brand_id, routing_context=None, **kwargs):
         from agents import talk_agent
-        from llm_client import get_claude_client
         client = get_claude_client()
 
         # Enrich history with routing context as a system seed if provided
@@ -138,12 +135,12 @@ class TalkAgent(BaseAgent):
 
 class MediaApprovalAgent(BaseAgent):
     name = "media_approval"
-    domain = "Approving or rejecting images and videos. Listing pending media awaiting approval."
+    domain = "Approving or rejecting images and videos by ID. Only for approve/reject actions — NOT for listing or searching media."
 
     def run(self, user_input, history, user_id, brand_id, routing_context=None, last_turn=None, **kwargs):
         # Delegate to orchestrator which handles multi-step approve/reject via tool calling
         from orchestrator import orchestrate
-        return orchestrate(
+        result = orchestrate(
             user_input=user_input,
             conversation_history=history,
             user_id=user_id,
@@ -151,6 +148,12 @@ class MediaApprovalAgent(BaseAgent):
             routing_context=routing_context,
             last_turn=last_turn,
         )
+        # If orchestrator returns a dict with actioned IDs, store in kwargs for main.py
+        if isinstance(result, dict):
+            self._last_action_meta = result  # main.py reads this via agent._last_action_meta
+            return result.get("response", "Done.")
+        self._last_action_meta = None
+        return result
 
 
 class MediaSearchAgent(BaseAgent):
@@ -159,7 +162,6 @@ class MediaSearchAgent(BaseAgent):
 
     def run(self, user_input, history, user_id, brand_id, routing_context=None, last_turn=None, **kwargs):
         from agents import search_media_agent
-        from llm_client import get_claude_client
         client = get_claude_client()
 
         seeded_history = list(history)
@@ -189,7 +191,6 @@ class DocsAgent(BaseAgent):
 
     def run(self, user_input, history, user_id, brand_id, routing_context=None, **kwargs):
         from agents import search_docs_agent
-        from llm_client import get_claude_client
         client = get_claude_client()
         return search_docs_agent(
             user_input=user_input,
@@ -255,8 +256,7 @@ def find_best_agent(user_input: str, exclude: str = None, conversation_context: 
             f"- 'brand_onboarding': ALL brand conversation — lookups, strategy, messaging, audience, general chat, everything brand-related that is not a direct field update\n"
             f"- 'media_approval': approving or rejecting media items\n"
             f"- 'media_search': listing, searching, or viewing media\n"
-            f"- 'brand_update': updating a specific brand field with an exact new value\n"
-            f"- 'docs': app how-to questions only\n"
+
             f"- Use the conversation context to understand what the user is referring to and route accordingly\n"
             f"- When in doubt → 'brand_onboarding'\n"
             f"Return ONLY the agent name, nothing else."
@@ -269,9 +269,9 @@ def find_best_agent(user_input: str, exclude: str = None, conversation_context: 
         if agent.name == answer and agent.name != exclude:
             return agent
 
-    # Fallback to talk
+    # Fallback to brand_onboarding (not talk — talk is only for media formatting)
     for agent in AGENT_REGISTRY:
-        if agent.name == "talk":
+        if agent.name == "brand_onboarding":
             return agent
 
     return None

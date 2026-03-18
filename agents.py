@@ -1,7 +1,10 @@
 from llm_client import get_claude_client
-from data_layer_vertexAI import get_brand_info, get_media_history, update_media_status, search_documentation, get_brand_context, get_brand_field, get_latest_brand_context
+from data_layer_vertexAI import (
+    get_brand_info, get_media_history, update_media_status,
+    search_documentation, get_brand_context, get_latest_brand_context,
+    update_brand_info, search_media, get_media_by_id
+)
 import json
-from data_layer_vertexAI import update_brand_info
 
 # ---------------
 # Models
@@ -316,8 +319,9 @@ def search_docs_agent(
 # ---------------
 # Conversational Response Wrapper
 # ---------------
-CONVERSATIONAL_SYSTEM_PROMPT="""You are a helpful internal assistant for Creativo, a marketing agency.
-    Communicate the action result naturally and conversationally to the Creativo team member.
+CONVERSATIONAL_SYSTEM_PROMPT = """
+You are a helpful internal assistant for a marketing agency.
+Communicate the action result naturally and conversationally.
     - Stay strictly aligned with what actually happened.
     - Be concise and friendly.
     - Do NOT invent details or suggest external platform changes.
@@ -325,21 +329,25 @@ CONVERSATIONAL_SYSTEM_PROMPT="""You are a helpful internal assistant for Creativ
     - Never output raw JSON."""
 
 def _conversational_response(client, user_input: str, conversation_history: list, action_result: str) -> str:
-
-    prompt = f"User asked: {user_input}\n\nAction completed: {action_result}\n\nCommunicate this result conversationally to the user."
     if client is None:
         client = get_claude_client()
 
     messages = []
     for msg in conversation_history:
         messages.append({"role": msg["role"], "content": msg["content"]})
-    messages.append({"role": "user", "content": user_input})
+    # Pass action_result as the final user message so LLM knows exactly what happened
+    messages.append({"role": "user", "content": (
+        f"The user said: {user_input}\n\n"
+        f"Action result: {action_result}\n\n"
+        f"Communicate this result conversationally. Report exactly what happened — "
+        f"do not change or reinterpret the result."
+    )})
 
     response = client.messages.create(
         model=MODEL_HAIKU,
         system=CONVERSATIONAL_SYSTEM_PROMPT,
         messages=messages,
-        max_tokens=600
+        max_tokens=400
     )
 
     for block in response.content:
@@ -390,11 +398,27 @@ def approve_media(
         client = get_claude_client()
 
     media_ids = kwargs.get("media_ids", kwargs.get("image_ids", []))
-    succeeded = [mid for mid in media_ids if update_media_status(mid, "approved")]
-    failed = [mid for mid in media_ids if mid not in succeeded]
-    action_result = f"Successfully approved {len(succeeded)} item(s): {', '.join(succeeded)}."
-    if failed:
-        action_result += f" The following IDs were not found: {', '.join(failed)}."
+    succeeded = []
+    skipped = []
+    not_found = []
+
+    for mid in media_ids:
+        doc = get_media_by_id(mid)
+        if not doc:
+            not_found.append(mid)
+        elif doc.get("status") != "pending":
+            skipped.append(f"{mid} (currently {doc.get('status', 'unknown')})")
+        else:
+            if update_media_status(mid, "approved"):
+                succeeded.append(mid)
+            else:
+                not_found.append(mid)
+
+    parts = []
+    if succeeded: parts.append(f"Approved: {', '.join(succeeded)}")
+    if skipped:   parts.append(f"Skipped (not pending): {', '.join(skipped)}")
+    if not_found: parts.append(f"Not found: {', '.join(not_found)}")
+    action_result = " | ".join(parts) or "No items were actioned."
     return _conversational_response(client, user_input, conversation_history, action_result)
 
 
@@ -410,11 +434,27 @@ def reject_media(
         client = get_claude_client()
 
     media_ids = kwargs.get("media_ids", kwargs.get("image_ids", []))
-    succeeded = [mid for mid in media_ids if update_media_status(mid, "rejected")]
-    failed = [mid for mid in media_ids if mid not in succeeded]
-    action_result = f"Successfully rejected {len(succeeded)} item(s): {', '.join(succeeded)}."
-    if failed:
-        action_result += f" The following IDs were not found: {', '.join(failed)}."
+    succeeded = []
+    skipped = []
+    not_found = []
+
+    for mid in media_ids:
+        doc = get_media_by_id(mid)
+        if not doc:
+            not_found.append(mid)
+        elif doc.get("status") != "pending":
+            skipped.append(f"{mid} (currently {doc.get('status', 'unknown')})")
+        else:
+            if update_media_status(mid, "rejected"):
+                succeeded.append(mid)
+            else:
+                not_found.append(mid)
+
+    parts = []
+    if succeeded: parts.append(f"Rejected: {', '.join(succeeded)}")
+    if skipped:   parts.append(f"Skipped (not pending): {', '.join(skipped)}")
+    if not_found: parts.append(f"Not found: {', '.join(not_found)}")
+    action_result = " | ".join(parts) or "No items were actioned."
     return _conversational_response(client, user_input, conversation_history, action_result)
 
 
@@ -448,7 +488,6 @@ def search_media_agent(
     if client is None:
         client = get_claude_client()
 
-    from data_layer_vertexAI import search_media
     results = search_media(
         user_id=user_id,
         brand_id=brand_id,
@@ -460,7 +499,6 @@ def search_media_agent(
     if not results:
         return "No media found matching your criteria."
 
-    import json
     media_context = json.dumps(results, indent=2)
 
     response = client.messages.create(
@@ -485,23 +523,65 @@ def search_media_agent(
 
 
 
-def brand_update_agent(brand_id: str, changes: dict) -> bool:
+def brand_update_agent(
+    user_input: str = None,
+    conversation_history: list = None,
+    user_id: str = None,
+    brand_id: str = None,
+    client=None,
+    update_request: str = None,
+    changes: dict = None,
+    **kwargs
+):
     """
-    Internal function — called only by flush_on_exit and flush_on_inactivity.
-    Writes collected brand field changes to Firestore using correct nested paths.
-    NOT a user-facing agent. Never called directly from routing.
+    Dual-mode brand update:
+    - Orchestrator tool call: receives user_input + update_request, extracts fields via Gemini.
+    - Internal call (finalizer/flush): receives brand_id + changes dict directly.
+    """
+    # Internal call path (from flush_on_exit / finalizer)
+    if changes is not None and brand_id and user_input is None:
+        if not changes:
+            return False
+        update_brand_info(brand_id, changes)
+        print(f"[BrandUpdate] Fields written to Firestore: {list(changes.keys())}")
+        return True
 
-    Args:
-        brand_id: Firestore brand document ID
-        changes: dict of flat field keys and new values e.g. {"brand_name": "Zerox", "mission": "..."}
-    Returns:
-        True if successful
-    """
-    if not changes:
-        return False
-    update_brand_info(brand_id, changes)
-    print(f"[BrandUpdate] Fields written to Firestore: {list(changes.keys())}")
-    return True
+    # Orchestrator call path — extract fields from user_input via Gemini
+    if client is None:
+        client = get_claude_client()
+
+    from llm_client import gemini_generate
+    import json as _json
+
+    source = update_request or user_input or ""
+    raw = gemini_generate(
+        prompt=f"User request: {source}",
+        system=(
+            "Extract brand fields to update. Return ONLY valid JSON. No markdown.\n"
+            "Extractable fields: brand_name, industry, mission, vision, values, tone, "
+            "brand_voice, communication_style, target_audience, primary_goal, "
+            "default_email_signature, tagline, positioning, brand_archetype.\n"
+            "Example: {\"tone\": \"bold and direct\", \"mission\": \"new mission\"}\n"
+            "If nothing clear to extract, return {}"
+        )
+    )
+
+    try:
+        extracted = _json.loads(raw.strip())
+    except Exception:
+        extracted = {}
+
+    extracted = {k: v for k, v in extracted.items() if v not in (None, "", [], {})}
+
+    if not extracted:
+        return "I couldn\'t identify which brand fields to update. Could you be more specific? For example: \'change our tone to bold and direct\' or \'update our mission to...\'."
+
+    update_brand_info(brand_id, extracted)
+    fields = ", ".join(extracted.keys())
+    print(f"[BrandUpdate] Orchestrator updated fields: {fields}")
+
+    action_result = f"Successfully updated brand fields: {fields}."
+    return _conversational_response(client, user_input or source, conversation_history or [], action_result)
 
 
 # ---------------
@@ -524,7 +604,14 @@ If history or brand context narrative contradicts the BRAND FACTS, ignore the co
 Read Industry and Audience from BRAND FACTS to understand what kind of content to write.
 Write a post about the given topic in the brand's voice, for the brand's audience, using the brand name from BRAND FACTS.
 
-When platform is missing → ask for it once. That is the only question you may ask.
+## When Media Details are provided
+If a "## Media Details (fetched from Firestore)" section is present in this prompt:
+- It contains the exact media the user is referring to — use its description as the topic.
+- Use the platform from the media details as the target platform.
+- Do NOT ask what the media is about — the answer is already there.
+- Write the caption specifically about that media item.
+
+When platform is missing AND no media details provided → ask for platform once. That is the only question you may ask.
 
 ## Format
 Return ONLY the caption. No preamble. Start directly with the content.
@@ -537,19 +624,6 @@ Always use the brand name from BRAND FACTS in the post or hashtags.
 - TikTok: Very short, punchy, 3-5 hashtags
 - Twitter/X: Under 280 chars, bold, 1-2 hashtags
 """
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 def write_caption_agent(
     user_input: str,
@@ -651,33 +725,79 @@ def write_caption_agent(
         messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": user_input})
 
-    # Extract media IDs from routing context and fetch their details from Firestore
-    import re as _re
+    # Resolve which media item(s) the user is referring to for caption writing.
+    # Uses a single Gemini call to understand the reference from full context —
+    # no hardcoded keyword matching. Returns a list of media IDs to fetch from Firestore.
+    import json as _json
     media_detail_section = ""
-    if routing_context:
-        media_ids = list(set(_re.findall(r'\b(image_\d+|video_\d+)\b', routing_context)))
-        if media_ids:
-            try:
-                from data_layer_vertexAI import get_media_by_id
-                lines = []
-                for mid in media_ids:
-                    media = get_media_by_id(mid)
-                    if media:
-                        lines.append(
-                            f"- {mid}: {media.get('title', 'unknown')} | "
-                            f"Platform: {media.get('platform', 'unknown')} | "
-                            f"Status: {media.get('status', 'unknown')} | "
-                            f"Description: {media.get('description', 'n/a')}"
-                        )
-                if lines:
-                    media_detail_section = "\n\n## Media Details (fetched from library)\n" + "\n".join(lines)
-                    print(f"[Caption] fetched media details for: {media_ids}")
-            except Exception as e:
+    media_ids = []
+
+    try:
+        import thread_manager as _tm
+        from data_layer_vertexAI import search_media as _sm
+        from llm_client import gemini_generate
+
+        # Fetch current media list from Firestore
+        all_media = _sm(user_id=user_id, brand_id=brand_id)
+        media_summary = _json.dumps([
+            {"id": m.get("id"), "type": m.get("type"), "description": m.get("description", ""),
+             "platform": m.get("platform", ""), "status": m.get("status", ""),
+             "created_at": m.get("created_at", "")}
+            for m in all_media
+        ])
+
+        # Build context for Gemini — session state + user request
+        session_context = f"Last media actions: {routing_context}" if routing_context else "No recent media actions."
+
+        resolved = gemini_generate(
+            prompt=(
+                f"User request: {user_input}\n\n"
+                f"Session context: {session_context}\n\n"
+                f"Available media:\n{media_summary}"
+            ),
+            system=(
+                "You are resolving which media item(s) the user wants to write a caption for.\n"
+                "Rules:\n"
+                "- If the user mentions a specific ID (image_001 etc.), return that ID.\n"
+                "- If the user says 'latest approved' or 'most recently approved', return the ID "
+                "  from the session context that was most recently approved (not sorted by created_at).\n"
+                "- If the user says 'last image/video', return the last item of that type from the media list.\n"
+                "- If the user references something discussed in session context, use those IDs.\n"
+                "- If no clear reference, return empty.\n"
+                "Return ONLY a JSON array of media IDs, e.g. [\"image_001\"] or []. No explanation."
+            )
+        )
+
+        try:
+            resolved_ids = _json.loads(resolved.strip())
+            if isinstance(resolved_ids, list):
+                media_ids = [m for m in resolved_ids if isinstance(m, str)]
+                print(f"[Caption] Gemini resolved media IDs: {media_ids}")
+        except Exception:
+            print(f"[Caption] Gemini resolution parse failed: {resolved}")
+
+    except Exception as _e:
+        print(f"[Caption] media resolution error: {_e}")
+
+    if media_ids:
+        try:
+            lines = []
+            for mid in media_ids:
+                media = get_media_by_id(mid)
+                if media:
+                    lines.append(
+                        f"- {mid}: {media.get('description', media.get('title', 'unknown'))} | "
+                        f"Platform: {media.get('platform', 'unknown')} | "
+                        f"Campaign: {media.get('campaign_name', 'n/a')}"
+                    )
+            if lines:
+                media_detail_section = "\n\n## Media Details (fetched from Firestore)\n" + "\n".join(lines)
+                print(f"[Caption] fetched media details for: {media_ids}")
+        except Exception as e:
                 print(f"[Caption] media fetch error: {e}")
 
     routing_section = (
         f"\n\n## Recent Context\n{routing_context}"
-        + media_detail_section
     ) if routing_context else ""
 
     # Fill agency_name placeholder in system prompt dynamically
@@ -689,6 +809,7 @@ def write_caption_agent(
         + f"\n\nPlatform: {platform or 'infer from context or ask once'}"
         + (f"\nTopic: {topic}" if topic else "")
         + routing_section
+        + media_detail_section  # always injected — even when routing_context is None
     )
 
 

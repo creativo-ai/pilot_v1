@@ -6,7 +6,7 @@ Base class for all agents. Each agent:
 - Can pull brand context from Vertex AI or structured fields from Firestore
 """
 
-from abc import ABC, abstractmethod
+from abc import ABC
 from llm_client import get_claude_client, gemini_generate
 import thread_manager
 
@@ -54,16 +54,22 @@ class BaseAgent(ABC):
             return self._route(user_input, user_id, brand_id, thread, routing_depth=routing_depth, **kwargs)
 
         print(f"[Router] {self.name} handling request")
-        response = self.run(
-            user_input=user_input,
-            history=history,
-            user_id=user_id,
-            brand_id=brand_id,
-            routing_context=routing_context,
-            last_turn=last_turn,
-            thread=thread,
-            **kwargs
-        )
+        try:
+            response = self.run(
+                user_input=user_input,
+                history=history,
+                user_id=user_id,
+                brand_id=brand_id,
+                routing_context=routing_context,
+                last_turn=last_turn,
+                thread=thread,
+                **kwargs
+            )
+        except Exception as e:
+            print(f"[{self.name}] Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return "I ran into an issue handling that request. Could you try again?"
 
         # Persist updated thread — thread dict may have been mutated by run() (e.g. collected_fields)
         thread = thread_manager.append_messages(thread, user_input, response)
@@ -156,13 +162,13 @@ class BaseAgent(ABC):
     ) -> str:
         """Generate summary of own thread, find best agent, route with summary."""
         if routing_depth > 2:
-            # Safety: fall back to talk agent directly, no more routing
+            # Safety: fall back to brand_onboarding, no more routing
             from agent_router import AGENT_REGISTRY
-            talk = next((a for a in AGENT_REGISTRY if a.name == "talk"), None)
-            if talk:
-                return talk.run(
+            fallback = next((a for a in AGENT_REGISTRY if a.name == "brand_onboarding"), None)
+            if fallback:
+                return fallback.run(
                     user_input=user_input,
-                    history=thread_manager.get_messages(thread_manager.load_thread(user_id, "talk")),
+                    history=thread_manager.get_messages(thread_manager.load_thread(user_id, "brand_onboarding")),
                     user_id=user_id,
                     brand_id=brand_id,
                     routing_context=f"Fallback after routing depth exceeded. Original request: {user_input}"

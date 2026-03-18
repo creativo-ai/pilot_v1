@@ -66,6 +66,7 @@ def get_media_history(user_id: str, brand_id: str):
     images = (
         db.collection("images")
         .where(filter=FieldFilter("user_id", "==", user_id))
+        .where(filter=FieldFilter("brand_id", "==", brand_id))
         .stream()
     )
     return [img.to_dict() for img in images]
@@ -81,8 +82,16 @@ def get_media_by_id(media_id: str) -> dict:
     return {}
 
 
-def update_media_status(image_id: str, new_status: str):
-    db.collection("images").document(image_id).update({"status": new_status})
+def update_media_status(image_id: str, new_status: str) -> bool:
+    try:
+        doc_ref = db.collection("images").document(image_id)
+        if not doc_ref.get().exists:
+            return False
+        doc_ref.update({"status": new_status})
+        return True
+    except Exception as e:
+        print(f"[update_media_status] Failed for {image_id}: {e}")
+        return False
 
 
 # -------------------------------------------------
@@ -137,11 +146,6 @@ def search_documentation(query: str, top_k: int = 3) -> list:
 
 
 # -------------------------------------------------
-# BRAND BOOK SEARCH
-# -------------------------------------------------
-
-
-# -------------------------------------------------
 # BRAND BOOK SEARCH (Firestore structured data)
 # -------------------------------------------------
 
@@ -191,8 +195,13 @@ def search_brand_book(brand_id: str, query: str = None, top_k: int = 3) -> list:
 def search_media(user_id: str, brand_id: str, status: str = None, media_type: str = None, platform: str = None) -> list:
     """
     Search media (images/videos) with optional filters.
+    Filters by both user_id and brand_id so each brand only sees its own media.
     """
-    query = db.collection("images").where(filter=FieldFilter("user_id", "==", user_id))
+    query = (
+        db.collection("images")
+        .where(filter=FieldFilter("user_id", "==", user_id))
+        .where(filter=FieldFilter("brand_id", "==", brand_id))
+    )
 
     if status:
         query = query.where(filter=FieldFilter("status", "==", status.lower()))
@@ -203,21 +212,8 @@ def search_media(user_id: str, brand_id: str, status: str = None, media_type: st
 
     return [doc.to_dict() for doc in query.stream()]
 
-# Backward compatibility aliases
-get_image_history = get_media_history
-update_image_status = update_media_status
 
-# =============================================================================
-# DUAL BRAND RETRIEVAL (new)
-# =============================================================================
 
-def get_brand_field(brand_id: str, field_name: str):
-    """
-    Path A: Fetch a specific structured field directly from Firestore.
-    Fast and exact. Use when you need tone, mission, colors, etc.
-    """
-    doc = db.collection("brands").document(brand_id).get()
-    return doc.to_dict().get(field_name) if doc.exists else None
 
 
 def get_brand_context(brand_id: str, query: str, top_k: int = 3) -> list:

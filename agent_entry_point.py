@@ -6,7 +6,7 @@ Usage: python agent_entry_point.py
 from agent_router import EmailAgent, CaptionAgent, MediaApprovalAgent, MediaSearchAgent, BrandOnboardingAgent, DocsAgent
 
 USER_ID = "manar"
-BRAND_ID = "maketing"
+BRAND_ID = "marketing"
 
 print("Available agents: email, caption, media_approval, media_search, brand_onboarding, docs")
 agent_name = input("Agent to test: ").strip() or "email"

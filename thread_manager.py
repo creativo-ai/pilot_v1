@@ -166,30 +166,6 @@ def get_stale_onboarding_threads(inactivity_minutes: int = 5) -> list:
     return stale
 
 
-# ── Active agent detection ────────────────────────────────────────────────────
-
-def get_last_active_agent(user_id: str) -> str | None:
-    """
-    Returns the name of the agent with the most recent last_active timestamp
-    for this user. Used by main.py to resume the right agent thread.
-    """
-    docs = (
-        db.collection(COLLECTION)
-        .where(filter=FieldFilter("user_id", "==", user_id))
-        .where(filter=FieldFilter("status", "==", "active"))
-        .stream()
-    )
-
-    latest_agent = None
-    latest_time = None
-    for doc in docs:
-        data = doc.to_dict()
-        t = data.get("last_active")
-        if t and (latest_time is None or t > latest_time):
-            latest_time = t
-            latest_agent = data.get("agent_name")
-
-    return latest_agent
 
 # ── Session reset ─────────────────────────────────────────────────────────────
 
@@ -213,3 +189,41 @@ def reset_user_behavior(user_id: str) -> list:
         doc.reference.delete()
         cleared.append(agent_name)
     return cleared
+
+# ── Last media action persistence ─────────────────────────────────────────────
+
+MEDIA_ACTION_COLLECTION = "session_state"
+
+def save_last_media_action(user_id: str, brand_id: str, action_summary: str) -> None:
+    """
+    Persist the last media action summary to Firestore so it survives process restarts.
+    Keyed by user_id + brand_id so different brands have independent histories.
+    """
+    doc_id = f"{user_id}__{brand_id}__media_action"
+    db.collection(MEDIA_ACTION_COLLECTION).document(doc_id).set({
+        "user_id": user_id,
+        "brand_id": brand_id,
+        "last_media_action": action_summary,
+        "updated_at": datetime.now(timezone.utc)
+    })
+
+
+def load_last_media_action(user_id: str, brand_id: str) -> str:
+    """
+    Load the last media action summary from Firestore.
+    Returns empty string if none exists.
+    """
+    doc_id = f"{user_id}__{brand_id}__media_action"
+    doc = db.collection(MEDIA_ACTION_COLLECTION).document(doc_id).get()
+    if doc.exists:
+        return doc.to_dict().get("last_media_action", "")
+    return ""
+
+
+def clear_last_media_action(user_id: str, brand_id: str) -> None:
+    """Clear the persisted media action — call on brand switch or full reset."""
+    doc_id = f"{user_id}__{brand_id}__media_action"
+    try:
+        db.collection(MEDIA_ACTION_COLLECTION).document(doc_id).delete()
+    except Exception:
+        pass
