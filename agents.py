@@ -11,6 +11,24 @@ MODEL_HAIKU = "claude-haiku-4-5-20251001"  # docs/media formatting
 
 
 # ---------------
+# Extracting values
+# ---------------
+
+
+def get_nested(data, *keys, default=""):
+    """
+    Safely extract a nested field from a dictionary.
+    Example:
+        get_nested(brand_info, "brand_personality", "tone_of_voice", "primary_tone")
+    """
+    for key in keys:
+        if isinstance(data, dict):
+            data = data.get(key, {})
+        else:
+            return default
+    return data if data else default
+
+# ---------------
 # Email Agent
 # ---------------
 
@@ -52,28 +70,31 @@ def write_email(
 
     # Layer 1: Structured fields from Firestore brands doc (always loaded — fast, small)
     brand_info = get_brand_info(brand_id) or {}
-    brand_name = brand_info.get("brand_name", "the agency")
+    brand_name = get_nested(brand_info, "metadata", "brand_name")
+    tone = get_nested(brand_info, "brand_personality", "tone_of_voice", "primary_tone")
+    brand_voice = get_nested(brand_info, "brand_personality", "brand_voice_description")
+    target_audience = get_nested(brand_info, "target_audience", "primary_audience", "demographics", "age_range")  # adjust if needed
+    mission = get_nested(brand_info, "brand_foundation", "mission")
+    values = ", ".join(get_nested(brand_info, "brand_foundation", "core_values", default=[]))
+    communication_style = get_nested(brand_info, "brand_personality", "personality_traits")  # or whatever fits
+    sign_off = get_nested(
+        brand_info, "email_branding", "default_signature", 
+        default=f"Best regards,\n{brand_name} Team"
+    )
+
 
     # Layer 2: Brand context embedding summary (always loaded — narrative richness)
     brand_summary = get_latest_brand_context(brand_id) or ""
 
     # Layer 3: On-demand — only load full brand book fields if Layer 1+2 seem thin
-    # Check if tone or voice are missing from structured fields before fetching
-    extra_fields = {}
-    for field in ["tone", "brand_voice", "target_audience", "communication_style"]:
-        if not brand_info.get(field):
-            val = get_brand_field(brand_id, field)
-            if val:
-                extra_fields[field] = val
-
     agency_context = f"""Brand Name: {brand_name}
-Tone: {brand_info.get("tone") or extra_fields.get("tone", "")}
-Brand Voice: {brand_info.get("brand_voice") or extra_fields.get("brand_voice", "")}
-Target Audience: {brand_info.get("target_audience") or extra_fields.get("target_audience", "")}
-Mission: {brand_info.get("mission", "")}
-Values: {brand_info.get("values", "")}
-Communication Style: {brand_info.get("communication_style") or extra_fields.get("communication_style", "")}
-Sign Off: {brand_info.get("default_email_signature", f"Best regards,\n{brand_name} Team")}
+Tone: {tone}
+Brand Voice: {brand_voice}
+Target Audience: {target_audience}
+Mission: {mission}
+Values: {values}
+Communication Style: {communication_style}
+Sign Off: {sign_off}
 {("\nBrand Context Summary:\n" + brand_summary) if brand_summary else ""}
 """
 
@@ -481,51 +502,29 @@ def brand_update_agent(brand_id: str, changes: dict) -> bool:
 # ---------------
 
 CAPTION_SYSTEM_PROMPT = """
-You are an expert social media content writer working inside Creativo, a marketing agency.
-Creativo's team uses you to write captions for their clients' social media posts.
+You write social media captions for {agency_name}.
 
-## Your Role
-You write captions FOR Creativo's clients. Always write AS the client brand — in their voice, for their audience.
-Use the client brand context below (tone, values, audience, personality) to shape every caption.
+The brand context below is {agency_name}'s profile. Every caption you write is FOR {agency_name} — posted on their channels, in their voice, to their audience.
 
-## Two Caption Types
-1. Client's own content (product, campaign, announcement) → write in the CLIENT's voice directly
-   Example client = burger restaurant: "Summer just got tastier 🍔☀️ Come try our new..."
-2. Creativo showcasing work FOR a client → write as Creativo talking about the work
-   Example: "We built a full summer campaign for our client in the F&B space 🎨"
-   Only use this type if the user explicitly says they're posting about agency work.
+NEVER ask who the caption is for. It is always for {agency_name}.
+NEVER ask for a client name. If the user mentions a topic like "pharmacy" or "burger restaurant", write a post about that topic IN {agency_name}'s voice — sharing tips, insights, or expertise about that industry for their SMB audience.
 
-Default to type 1 (client voice) unless told otherwise.
+Write immediately when you have a platform and topic. No questions, no clarifications.
+If platform is missing and cannot be inferred from context → ask for it ONCE. That is the only question allowed.
 
-## When to Write Immediately
-- Platform given → write now, no questions
-- "Another post for [platform]" → platform is known, write now
-- Client name or topic mentioned → write now, client name is enough
-- If you have ANY of: platform + topic, platform + client, or platform + context → write immediately
-- The client name is a nice detail but NOT required — if missing, write "our client" or infer from topic
+Return ONLY the caption text. No preamble, no explanations. Start directly with the content.
 
-## Platform Guidelines
-- Instagram: Visual-first, hook + body + CTA, under 150 words, 3-5 hashtags
-- LinkedIn: Professional, thought leadership, 1-3 hashtags max
-- Facebook: Conversational, community-focused, medium length
-- TikTok: Fun, punchy, trend-aware, very short, 3-5 hashtags
-- Twitter/X: Under 280 chars, witty or bold, 1-2 hashtags max
-- YouTube: SEO-friendly description, detailed
-
-## Critical Rules
-- Return ONLY the caption text. No intro, no explanation, no "Would you like changes?".
-- Start directly with the caption content.
-- Use Brand Context below — NEVER ask for brand name, tone, or voice.
-- If platform is missing AND cannot be inferred → ask for it ONCE, that is your ONLY allowed question.
-- Read full conversation history — use any platform, client, media title, or topic already mentioned.
-- NEVER ask for client name — if missing, write "our client" and move on.
-- If conversation history shows a media item (video/image title, ID, platform) → use it as the topic immediately.
-- NEVER ask "what is in the video/image" if the title or context is already in the conversation history.
-- A media title like "Brand intro reel for Instagram" is enough context — write the caption using it.
-- When the user references "the approved video/image", "the rejected one", or similar — find the MOST RECENTLY mentioned media item matching that description in conversation history. Use that specific item, not an older one.
-- When context shows a media item with a known platform (e.g. "LinkedIn Product Launch Graphic" on LinkedIn) — infer the platform from it. Never ask for the platform if it is already clear from the item's name or platform field in context.
-- If asked to retrieve or review a caption previously written, search conversation history first. If found, return it exactly. If not found, say: "I don't have a saved caption for that — would you like me to write one now?" Never invent a caption you did not write in this conversation.
+Platform style:
+- Instagram: Hook + value + CTA, under 150 words, 3-5 hashtags, emojis welcome
+- LinkedIn: Professional, insight-driven, 1-3 hashtags, minimal emojis
+- Facebook: Conversational, community feel, medium length
+- TikTok: Very short, punchy, 3-5 hashtags
+- Twitter/X: Under 280 chars, bold, 1-2 hashtags
 """
+
+
+
+
 
 
 def write_caption_agent(
@@ -544,50 +543,80 @@ def write_caption_agent(
     if client is None:
         client = get_claude_client()
 
-    # Layer 1: Structured fields from Firestore brands doc (always loaded)
     brand_info = get_brand_info(brand_id) or {}
-    brand_name = brand_info.get("brand_name", "")
-
-    # Layer 2: Brand context embedding summary (always loaded)
     brand_summary = get_latest_brand_context(brand_id) or ""
 
-    # Layer 3: On-demand — fetch any missing fields from full brand JSON
-    fetch_fields = ["tone", "brand_voice", "target_audience", "vision",
-                    "content_strategy", "social_media_guidelines", "hashtags",
-                    "content_pillars", "brand_archetype"]
-    extra_fields = {}
-    for field in fetch_fields:
-        if not brand_info.get(field):
-            val = get_brand_field(brand_id, field)
-            if val:
-                extra_fields[field] = val
+    def _read(brand_info, *paths):
+        """
+        Try each path in order. A path is a list of keys to traverse.
+        Falls back to checking flat keys directly on brand_info.
+        Returns first non-empty string found.
+        """
+        for path in paths:
+            if isinstance(path, str):
+                path = [path]
+            node = brand_info
+            for key in path:
+                if isinstance(node, dict):
+                    node = node.get(key, {})
+                else:
+                    node = {}
+                    break
+            # Flatten result to string
+            if isinstance(node, str) and node.strip():
+                return node.strip()
+            if isinstance(node, list) and node:
+                flat = ", ".join(str(v) for v in node if v)
+                if flat:
+                    return flat
+            if isinstance(node, dict) and node:
+                # Try common string keys inside the dict
+                for k in ("description", "primary_tone", "summary", "text", "statement"):
+                    if isinstance(node.get(k), str) and node[k].strip():
+                        return node[k].strip()
+                # Last resort: join non-empty string values
+                flat = ", ".join(str(v) for v in node.values() if isinstance(v, str) and v.strip())
+                if flat:
+                    return flat
+        return ""
 
-    def _get(key):
-        return brand_info.get(key) or extra_fields.get(key, "")
+    # Read each field trying multiple possible paths (nested → flat fallback)
+    brand_name    = _read(brand_info, ["metadata", "brand_name"], ["brand_name"])
+    mission       = _read(brand_info, ["brand_foundation", "mission"], ["mission"])
+    vision        = _read(brand_info, ["brand_foundation", "vision"], ["vision"])
+    values        = _read(brand_info, ["brand_foundation", "core_values"], ["values"], ["core_values"])
+    tone          = _read(brand_info, ["brand_personality", "tone_of_voice", "primary_tone"],
+                                      ["brand_personality", "tone_of_voice"],
+                                      ["tone"])
+    brand_voice   = _read(brand_info, ["brand_personality", "brand_voice_description"], ["brand_voice"])
+    target_aud    = _read(brand_info, ["target_audience", "primary_audience", "description"],
+                                      ["target_audience", "primary_audience"],
+                                      ["target_audience"])
+    tagline       = _read(brand_info, ["brand_foundation", "tagline"], ["tagline"])
+    positioning   = _read(brand_info, ["brand_foundation", "positioning_statement"], ["positioning"])
+    personality   = _read(brand_info, ["brand_personality", "personality_traits"], ["personality_traits"])
+    content_pill  = _read(brand_info, ["content_strategy", "content_pillars"], ["content_pillars"])
+    hashtags      = _read(brand_info, ["content_strategy", "hashtag_strategy"], ["hashtags"])
 
-    brand_context_parts = [
-        f"Brand Name: {brand_name}",
-        f"Mission: {_get('mission')}",
-        f"Vision: {_get('vision')}",
-        f"Values: {_get('values')}",
-        f"Target Audience: {_get('target_audience')}",
-        f"Tone: {_get('tone')}",
-        f"Brand Voice: {_get('brand_voice')}",
-        f"Brand Archetype: {_get('brand_archetype')}",
-        f"Content Pillars: {_get('content_pillars')}",
-        f"Content Strategy: {_get('content_strategy')}",
-        f"Social Media Style: {_get('social_media_guidelines')}",
-        f"Hashtag Strategy: {_get('hashtags')}",
-    ]
-    # Only include lines that have actual values
-    brand_context = "\n".join(line for line in brand_context_parts if not line.endswith(": ") and not line.endswith(": []") and not line.endswith(": None"))
-    if brand_summary:
-        brand_context += f"\n\nBrand Context Summary:\n{brand_summary}"
-    if missing_brand_info:
-        brand_context += f"\n\nAdditional info from user: {missing_brand_info}"
+    # Build brand context — only include fields that have actual values
+    parts = []
+    if brand_name:       parts.append(f"Agency Name: {brand_name}")
+    if mission:          parts.append(f"Mission: {mission}")
+    if vision:           parts.append(f"Vision: {vision}")
+    if values:           parts.append(f"Values: {values}")
+    if tone:             parts.append(f"Tone: {tone}")
+    if brand_voice:      parts.append(f"Brand Voice: {brand_voice}")
+    if personality:      parts.append(f"Personality: {personality}")
+    if target_aud:       parts.append(f"Target Audience: {target_aud}")
+    if tagline:          parts.append(f"Tagline: {tagline}")
+    if positioning:      parts.append(f"Positioning: {positioning}")
+    if content_pill:     parts.append(f"Content Pillars: {content_pill}")
+    if hashtags:         parts.append(f"Hashtag Strategy: {hashtags}")
+    if brand_summary:    parts.append(f"\nBrand Summary:\n{brand_summary}")
+    if missing_brand_info: parts.append(f"Additional info: {missing_brand_info}")
 
-    platform_note = f"Platform: {platform}" if platform else "Platform: not specified — infer from context or ask once."
-    topic_note = f"Topic/Subject: {topic}" if topic else ""
+    brand_context = "\n".join(parts) if parts else "No brand context available yet."
+    print(f"[Caption] brand_context fields: {[p.split(':')[0] for p in parts]}")
 
     messages = []
     for msg in conversation_history:
@@ -596,13 +625,24 @@ def write_caption_agent(
 
     routing_section = (
         f"\n\n## Recent Context\n"
-        f"The following was just discussed — use it to understand what media or topic the user is referring to:\n"
+        f"The following was just discussed — use it to understand what the user is referring to:\n"
         f"{routing_context}"
     ) if routing_context else ""
 
+    # Fill agency_name placeholder in system prompt dynamically
+    filled_prompt = CAPTION_SYSTEM_PROMPT.replace("{agency_name}", brand_name or "our agency")
+
+    system = (
+        filled_prompt
+        + f"\n\n## Agency Brand Context\n{brand_context}"
+        + f"\n\nPlatform: {platform or 'infer from context or ask once'}"
+        + (f"\nTopic: {topic}" if topic else "")
+        + routing_section
+    )
+
     response = client.messages.create(
         model=MODEL_SONNET,
-        system=CAPTION_SYSTEM_PROMPT + f"\n\n## Brand Context\n{brand_context}\n\n{platform_note}\n{topic_note}" + routing_section,
+        system=system,
         messages=messages,
         max_tokens=600
     )
@@ -612,6 +652,7 @@ def write_caption_agent(
             return block.text.strip()
 
     return "Could not generate caption."
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PASSIVE BRAND LEARNING

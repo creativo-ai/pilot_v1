@@ -1,14 +1,27 @@
+from dotenv import load_dotenv
+load_dotenv()
 from google.cloud import firestore
-import os
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "creativo-bf5c8-fc5f772a16e4.json"
 
 db = firestore.Client(project="creativo-bf5c8", database="agent-orchestration")
 
-USER_ID = "manar"
-
-threads = db.collection("agent_threads").where("user_id", "==", USER_ID).stream()
+# 1. Delete all agent threads
+threads = db.collection("agent_threads").stream()
+count = 0
 for doc in threads:
     doc.reference.delete()
-    print(f"Deleted thread: {doc.id}")
+    count += 1
+print(f"✅ Deleted {count} agent threads")
 
-print("Conversation threads cleared — brand data preserved")
+# 2. Delete brand doc
+db.collection("brands").document("marketing").delete()
+print("✅ Brand doc deleted")
+
+# 3. Delete all brand_context chunks
+chunks = db.collection("brand_context").stream()
+count = 0
+for doc in chunks:
+    doc.reference.delete()
+    count += 1
+print(f"✅ Deleted {count} brand_context chunks")
+
+print("\nDone — fresh start. Media untouched.")

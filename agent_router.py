@@ -83,7 +83,7 @@ class CaptionAgent(BaseAgent):
 
 class TalkAgent(BaseAgent):
     name = "talk"
-    domain = "Formatter and presenter for media search and media approval results only. Not used for conversation."
+    domain = "ONLY used internally to format and present media search results and media approval confirmations. Never used for brand questions, brand updates, or general conversation."
 
     def run(self, user_input, history, user_id, brand_id, routing_context=None, **kwargs):
         from agents import talk_agent
@@ -173,7 +173,7 @@ class DocsAgent(BaseAgent):
 
 class BrandOnboardingAgent(BaseAgent):
     name = "brand_onboarding"
-    domain = "All brand conversation: brand lookups, strategy, messaging, audience questions, expansion ideas, and new onboarding. Default agent for any brand or general conversation."
+    domain = "Everything brand-related: building brand book, updating any brand field (name, mission, vision, values, tone, audience, colors), brand lookups, strategy, and general conversation. Use this for ANY request that mentions changing, updating, or setting a brand field. Default agent when nothing else matches."
 
     def run(self, user_input, history, user_id, brand_id, routing_context=None, last_turn=None, **kwargs):
         from brand_onboarding_agent import BrandOnboardingAgent as _Agent

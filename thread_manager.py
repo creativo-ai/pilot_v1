@@ -190,3 +190,26 @@ def get_last_active_agent(user_id: str) -> str | None:
             latest_agent = data.get("agent_name")
 
     return latest_agent
+
+# ── Session reset ─────────────────────────────────────────────────────────────
+
+def reset_user_behavior(user_id: str) -> list:
+    """
+    Clear all behavioral agent threads for this user.
+    Keeps brand_onboarding thread intact (preserves brand data).
+    Returns list of cleared agent names.
+    """
+    docs = (
+        db.collection(COLLECTION)
+        .where(filter=FieldFilter("user_id", "==", user_id))
+        .stream()
+    )
+    cleared = []
+    for doc in docs:
+        data = doc.to_dict()
+        agent_name = data.get("agent_name", "")
+        if agent_name == "brand_onboarding":
+            continue  # preserve brand data
+        doc.reference.delete()
+        cleared.append(agent_name)
+    return cleared

@@ -55,8 +55,17 @@ def get_media_history(user_id: str, brand_id: str):
     return [img.to_dict() for img in images]
 
 
-def update_media_status(image_id: str, new_status: str):
-    db.collection("images").document(image_id).update({"status": new_status})
+def update_media_status(image_id: str, new_status: str) -> bool:
+    try:
+        doc_ref = db.collection("images").document(image_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            return False
+        doc_ref.update({"status": new_status})
+        return True
+    except Exception as e:
+        print(f"[update_media_status] Failed for {image_id}: {e}")
+        return False
 
 
 # -------------------------------------------------
