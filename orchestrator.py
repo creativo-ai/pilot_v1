@@ -189,9 +189,12 @@ def build_system_prompt(brand_info: dict, brand_context_chunks: list) -> str:
         - When user requests action on multiple items, resolve ALL positions first,
           then call the appropriate tool(s) with all resolved IDs at once.
 
-        NEVER pre-check status before calling tools — the tools do this internally.
-        NEVER skip calling a tool because you think the item is not pending — let the tool decide.
-        NEVER report a status based on conversation history or session context.
+        CRITICAL — YOU MUST ALWAYS CALL THE TOOLS:
+        - NEVER report an outcome without calling approve_media or reject_media first.
+        - NEVER assume you know the result — only the tool knows what actually happened.
+        - NEVER skip the tool call because you think the item is already approved/rejected.
+        - The ONLY valid flow is: search_media → resolve IDs → call tool → report tool result.
+        - If you report a result without calling the tool, you are hallucinating — do not do this.
 
         Always include item title AND platform in your approval/rejection summary.
         Never mention Firestore, search_media, internal tools, or internal steps to the user.
@@ -252,13 +255,8 @@ def orchestrate(
 
     # Force a tool call on step 0 for any media-related request
     # so Claude always hits Firestore — never reads status from conversation history
-    _media_keywords = ("approve", "reject", "accept", "decline", "last", "first",
-                       "pending", "image", "video", "media", "status")
-    _needs_tool = any(k in user_input.lower() for k in _media_keywords)
-
     while step < MAX_STEPS:
-        # Force any tool use on first step for media requests
-        tool_choice = {"type": "any"} if (_needs_tool and step == 0) else {"type": "auto"}
+        tool_choice = {"type": "auto"}
         response = client.messages.create(
             model="claude-sonnet-4-6",
             system=system_prompt,
@@ -301,18 +299,19 @@ def orchestrate(
                             **tool_args
                         )
                         last_text_response = result
-                        # Track actually actioned IDs from agent result — skips non-pending items
-                        # Result format: "Approved: id1, id2 | Skipped: id3 | ..."
-                        if tool_name in ("approve_media", "reject_media") and isinstance(result, str):
-                            import re as _re2
-                            if tool_name == "approve_media":
-                                _ids = _re2.findall(r'Approved:\s*((?:image_\d+|video_\d+)(?:,\s*(?:image_\d+|video_\d+))*)', result)
-                                for group in _ids:
-                                    actioned_approved.extend([i.strip() for i in group.split(",")])
-                            elif tool_name == "reject_media":
-                                _ids = _re2.findall(r'Rejected:\s*((?:image_\d+|video_\d+)(?:,\s*(?:image_\d+|video_\d+))*)', result)
-                                for group in _ids:
-                                    actioned_rejected.extend([i.strip() for i in group.split(",")])
+                        # Track actually actioned IDs — read directly from Firestore
+                        # to know which items were pending and got actioned (not all tool_args IDs)
+                        if tool_name in ("approve_media", "reject_media"):
+                            from data_layer_vertexAI import get_media_by_id as _gmbi
+                            for _mid in tool_args.get("media_ids", []):
+                                _doc = _gmbi(_mid)
+                                _new_status = "approved" if tool_name == "approve_media" else "rejected"
+                                if _doc and _doc.get("status") == _new_status:
+                                    # Status changed — it was pending and got actioned
+                                    if tool_name == "approve_media":
+                                        actioned_approved.append(_mid)
+                                    else:
+                                        actioned_rejected.append(_mid)
                     else:
                         result = f"Tool '{tool_name}' not found."
 

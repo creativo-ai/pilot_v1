@@ -29,6 +29,7 @@ _last_turn: dict = {}  # {user, response, agent} — full text, no truncation
 _current_brand = BRAND_ID  # tracks active brand to detect switches
 _routing_summary = None   # Gemini-generated summary of recent conversation
 _last_media_action: str = ""  # persists last media action summary across turns (never overwritten by non-media turns)
+_session_media_actioned: bool = False  # True after first media approval/rejection this session
 
 
 def reset_session(user_id: str) -> None:
@@ -43,6 +44,7 @@ def reset_session(user_id: str) -> None:
     _routing_summary = None
     _last_turn = {}
     _last_media_action = ""
+    _session_media_actioned = False
     thread_manager.clear_last_media_action(user_id, BRAND_ID)
     ROUTING_WINDOW.clear()
     if cleared:
@@ -140,7 +142,7 @@ def main():
     start_listener()
     start_debug()
 
-    global ROUTING_WINDOW, _current_brand, _routing_summary, _last_media_action
+    global ROUTING_WINDOW, _current_brand, _routing_summary, _last_media_action, _session_media_actioned
 
     # Restore last media action from Firestore so caption context survives restarts
     _last_media_action = thread_manager.load_last_media_action(USER_ID, BRAND_ID)
@@ -165,6 +167,7 @@ def main():
             ROUTING_WINDOW.clear()
             _routing_summary = None
             _last_media_action = ""
+            _session_media_actioned = False
             thread_manager.clear_last_media_action(USER_ID, BRAND_ID)
             _current_brand = BRAND_ID
             print(f"[Brand switched to: {BRAND_ID} — routing context cleared]")
@@ -210,10 +213,18 @@ def main():
                 if _meta.get("approved"): _parts.append("Approved: " + ", ".join(_meta["approved"]))
                 if _meta.get("rejected"): _parts.append("Rejected: " + ", ".join(_meta["rejected"]))
                 if _parts:
-                    _last_media_action = " | ".join(_parts)
+                    new_action = " | ".join(_parts)
+                    if not _session_media_actioned:
+                        # First approval this session — replace old session state entirely
+                        _last_media_action = new_action
+                        _session_media_actioned = True
+                        print(f"[Session] New session — replaced media action: {_last_media_action}")
+                    else:
+                        # Same session — append new actions to existing ones
+                        _last_media_action = (_last_media_action + " | " + new_action) if _last_media_action else new_action
+                        print(f"[Session] Appended media action: {_last_media_action}")
                     try:
                         thread_manager.save_last_media_action(USER_ID, BRAND_ID, _last_media_action)
-                        print(f"[Session] Saved media action: {_last_media_action}")
                     except Exception as _e:
                         print(f"[Session] Failed to persist media action: {_e}")
 

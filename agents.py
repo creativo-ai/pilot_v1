@@ -332,29 +332,34 @@ def _conversational_response(client, user_input: str, conversation_history: list
     if client is None:
         client = get_claude_client()
 
-    messages = []
-    for msg in conversation_history:
-        messages.append({"role": msg["role"], "content": msg["content"]})
-    # Pass action_result as the final user message so LLM knows exactly what happened
-    messages.append({"role": "user", "content": (
-        f"The user said: {user_input}\n\n"
-        f"Action result: {action_result}\n\n"
-        f"Communicate this result conversationally. Report exactly what happened — "
-        f"do not change or reinterpret the result."
-    )})
+    # Do NOT pass conversation history — old messages cause the LLM to override
+    # the action_result with stale status information from previous turns.
+    # The action_result is the ONLY source of truth for what just happened.
+    messages = [
+        {
+            "role": "user",
+            "content": (
+                f"The user requested: {user_input}\n\n"
+                f"Action result: {action_result}\n\n"
+                f"Communicate this result conversationally in 1-3 sentences. "
+                f"Report EXACTLY what the action result says — do not change, reinterpret, "
+                f"or contradict it under any circumstances."
+            )
+        }
+    ]
 
     response = client.messages.create(
         model=MODEL_HAIKU,
         system=CONVERSATIONAL_SYSTEM_PROMPT,
         messages=messages,
-        max_tokens=400
+        max_tokens=300
     )
 
     for block in response.content:
         if getattr(block, "type", None) == "text":
             return block.text.strip()
 
-    return "Sorry, I couldn't respond."
+    return action_result  # fallback: return raw result if LLM fails
 
 # ---------------
 # Image Agents
@@ -419,6 +424,7 @@ def approve_media(
     if skipped:   parts.append(f"Skipped (not pending): {', '.join(skipped)}")
     if not_found: parts.append(f"Not found: {', '.join(not_found)}")
     action_result = " | ".join(parts) or "No items were actioned."
+    print(f"[approve_media] action_result: {action_result}")
     return _conversational_response(client, user_input, conversation_history, action_result)
 
 
@@ -455,6 +461,7 @@ def reject_media(
     if skipped:   parts.append(f"Skipped (not pending): {', '.join(skipped)}")
     if not_found: parts.append(f"Not found: {', '.join(not_found)}")
     action_result = " | ".join(parts) or "No items were actioned."
+    print(f"[reject_media] action_result: {action_result}")
     return _conversational_response(client, user_input, conversation_history, action_result)
 
 
