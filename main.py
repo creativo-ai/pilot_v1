@@ -17,8 +17,8 @@ from brand_finalizer import start_listener
 from debug_server import start as start_debug
 from debug_hooks import log_user_input, log_agent_selected, log_agent_response
 
-USER_ID  = "manar"
-BRAND_ID = "mario"
+USER_ID  = "marmar"
+BRAND_ID = "test3"
 
 # Short-term conversation window — last N turns kept in memory for routing context
 # This is NOT agent history — it's just for the classifier to understand context

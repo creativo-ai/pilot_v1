@@ -10,225 +10,52 @@
     "approved_by": "",
     "notes": ""
   },
-
-  "brand_foundation": {
-    "mission": "",
-    "vision": "",
-    "purpose": "",
-    "core_values": [],
-    "brand_promise": "",
-    "brand_story": {
-      "origin_story": "",
-      "founder_story": "",
-      "problem_statement": "",
-      "solution_statement": "",
-      "milestones": []
+    "brand_core": {
+      "vision": "",
+      "mission": "",
+      "emotion": "",
+      "competitor": [""],
+      "domain": "",
+      "usp_statement": "",
+      "name": "",
+      "market_positioning": "",
+      "core_values": [""]
     },
-    "positioning_statement": "",
-    "value_proposition": "",
-    "unique_selling_points": [],
-    "tagline": "",
-    "slogan": ""
-  },
-
-  "brand_personality": {
-    "archetype_primary": "",
-    "archetype_secondary": "",
-    "personality_traits": [],
-    "brand_human_character": "",
-    "brand_voice_description": "",
-    "tone_of_voice": {
-      "primary_tone": "",
-      "secondary_tones": [],
-      "tone_spectrum": {
-        "formal_to_casual": "",
-        "serious_to_playful": "",
-        "luxury_to_accessible": "",
-        "technical_to_simple": ""
+    "brand_voice": {
+      "tone_of_voice": "",
+      "words_to_avoid": [""],
+      "key_messages": [""],
+      "taglines_and_slogans": [""]
+    },
+    "target_audience": {
+      "primary_audience": "",
+      "demographics": {
+        "gender": "",
+        "communication_style": "",
+        "income_level": "",
+        "location": "",
+        "pain_points_behaviors": "",
+        "interests": "",
+        "age": ""
       }
     },
-    "do_and_dont_language": {
-      "do": [],
-      "dont": []
-    }
-  },
-
-  "target_audience": {
-    "primary_audience": {
-      "demographics": {
-        "age_range": "",
-        "gender": "",
-        "location": "",
-        "income_level": "",
-        "education_level": "",
-        "occupation": ""
+    "visual_identity": {
+      "logo_usage": {
+        "icon_only_version": "",
+        "full_logo": "",
+        "black_white_variations": ""
       },
-      "psychographics": {
-        "interests": [],
-        "values": [],
-        "lifestyle": "",
-        "pain_points": [],
-        "goals": [],
-        "motivations": []
+      "typography": {
+        "font_for_headings": "",
+        "font_for_body_text": ""
       },
-      "behavioral_traits": [],
-      "buying_triggers": [],
-      "objections": []
-    },
-    "secondary_audience": {},
-    "buyer_personas": []
-  },
-
-  "market_positioning": {
-    "industry": "",
-    "category": "",
-    "market_maturity": "",
-    "competitive_landscape": {
-      "direct_competitors": [],
-      "indirect_competitors": [],
-      "competitive_advantages": [],
-      "competitive_gaps": []
-    },
-    "market_differentiation": "",
-    "blue_ocean_strategy": "",
-    "pricing_strategy": "",
-    "distribution_channels": []
-  },
-
-  "brand_messaging": {
-    "core_messages": [],
-    "elevator_pitch_short": "",
-    "elevator_pitch_long": "",
-    "key_benefits": [],
-    "feature_to_benefit_mapping": [],
-    "emotional_hooks": [],
-    "proof_points": [],
-    "call_to_action_styles": [],
-    "communication_pillars": []
-  },
-
-  "visual_identity": {
-    "logo": {
-      "primary_logo_url": "",
-      "secondary_logo_url": "",
-      "icon_logo_url": "",
-      "clear_space_rules": "",
-      "minimum_size_rules": "",
-      "incorrect_usage_examples": []
-    },
-    "color_palette": {
-      "primary_colors": [],
-      "secondary_colors": [],
-      "accent_colors": [],
-      "neutral_colors": [],
-      "color_usage_rules": ""
-    },
-    "typography": {
-      "primary_font": "",
-      "secondary_font": "",
-      "web_font": "",
-      "fallback_fonts": [],
-      "font_usage_rules": ""
-    },
-    "imagery_style": {
-      "photography_style": "",
-      "illustration_style": "",
-      "iconography_style": "",
-      "visual_mood": "",
-      "filters_or_effects": ""
-    },
-    "design_system": {
-      "layout_principles": "",
-      "grid_system": "",
-      "border_radius": "",
-      "shadow_style": "",
-      "animation_style": ""
+      "color_palette": {
+        "secondary_colors": [
+          ""
+        ],
+        "primary_colors": [
+          ""
+        ]
+      }
     }
-  },
-
-  "content_strategy": {
-    "content_pillars": [],
-    "content_types": [],
-    "platform_strategy": {
-      "instagram": "",
-      "linkedin": "",
-      "twitter": "",
-      "tiktok": "",
-      "youtube": "",
-      "email": "",
-      "blog": ""
-    },
-    "posting_frequency": "",
-    "hashtag_strategy": [],
-    "seo_keywords": [],
-    "editorial_guidelines": "",
-    "forbidden_topics": []
-  },
-
-  "social_media_guidelines": {
-    "bio_templates": [],
-    "caption_frameworks": [],
-    "community_management_tone": "",
-    "crisis_communication_style": "",
-    "engagement_rules": []
-  },
-
-  "email_branding": {
-    "default_signature": "",
-    "email_greeting_style": "",
-    "email_closing_style": "",
-    "newsletter_structure": "",
-    "subject_line_style": ""
-  },
-
-  "product_or_service": {
-    "offerings": [],
-    "flagship_product": "",
-    "pricing_tiers": [],
-    "core_features": [],
-    "roadmap_direction": ""
-  },
-
-  "customer_experience": {
-    "customer_journey_stages": [],
-    "brand_touchpoints": [],
-    "support_tone": "",
-    "refund_policy_summary": "",
-    "loyalty_program_details": ""
-  },
-
-  "legal_and_compliance": {
-    "brand_trademark_status": "",
-    "usage_rights": "",
-    "copyright_notes": "",
-    "compliance_requirements": []
-  },
-
-  "internal_guidelines": {
-    "employee_brand_behavior": "",
-    "internal_voice_guidelines": "",
-    "partnership_criteria": "",
-    "collaboration_rules": ""
-  },
-
-  "performance_metrics": {
-    "kpis": [],
-    "brand_health_metrics": [],
-    "growth_targets": [],
-    "engagement_metrics": []
-  },
-
-  "future_vision": {
-    "short_term_goals": [],
-    "long_term_goals": [],
-    "expansion_plans": [],
-    "innovation_focus": []
-  },
-
-  "attachments": {
-    "brand_assets_drive_link": "",
-    "press_kit_link": "",
-    "media_mentions": [],
-    "case_studies": []
   }
-}

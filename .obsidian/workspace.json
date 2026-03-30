@@ -14,7 +14,7 @@
               "type": "markdown",
               "state": {
                 "file": "system_flow_v2.md",
-                "mode": "source",
+                "mode": "preview",
                 "source": false
               },
               "icon": "lucide-file",
@@ -186,6 +186,9 @@
   },
   "active": "32b91bf9a800727c",
   "lastOpenFiles": [
+    "chat_ui.html",
+    "chat_server.py",
+    "brand_onboarding_agent copy.py",
     "System_flow.md",
     "system_flow_v2.md",
     "system_flow_complete.mmd",
