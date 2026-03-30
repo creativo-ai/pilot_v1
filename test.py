@@ -12,7 +12,7 @@ for doc in db.collection("agent_threads").stream():
     print(f"Deleted thread: {doc.id}")
 
 # 2. Delete brand doc
-db.collection("brands").document("test2").delete()
+db.collection("brands").document("test4").delete()
 print("Deleted brand doc")
 
 # 3. Delete ALL brand_context chunks

@@ -48,7 +48,7 @@ def load_thread(user_id: str, agent_name: str) -> dict:
     }
 
 
-def save_thread(user_id: str, agent_name: str, thread: dict) -> None:
+def save_thread(user_id: str, agent_name: str, thread: dict, brand_id: str = None) -> None:
     """Persist the full thread document, updating last_active timestamp."""
     now = datetime.now(timezone.utc)
     thread["last_active"] = now
@@ -57,7 +57,8 @@ def save_thread(user_id: str, agent_name: str, thread: dict) -> None:
         thread["created_at"] = now
     thread["user_id"] = user_id
     thread["agent_name"] = agent_name
-
+    if brand_id:                          # ← always overwrite, even if thread had an old one
+        thread["brand_id"] = brand_id
     db.collection(COLLECTION).document(
         _doc_id(user_id, agent_name)
     ).set(thread)

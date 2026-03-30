@@ -42,6 +42,9 @@ def server_flush_on_exit():
             u_id = thread.get("user_id")
             b_id = thread.get("brand_id")
             
+            if not b_id:               
+                print(f"[Flush] Skipping thread for {u_id} — no brand_id")
+                continue
             # Only save if we actually collected fields or had a conversation
             if thread.get("collected_fields") or thread.get("messages"):
                 print(f"Flushing thread for User: {u_id}, Brand: {b_id}...")
@@ -58,35 +61,55 @@ atexit.register(server_flush_on_exit)
 
 @app.route("/chat", methods=["POST"])
 def chat():
+    global active_user_id, active_brand_id
     data = request.json or {}
 
     user_id      = data.get("user_id", "marmar")
-    brand_id     = data.get("brand_id", "test4")
+    brand_id     = data.get("brand_id", "")   # no fallback — must be explicit
     message      = data.get("message", "").strip()
     history      = data.get("history", [])
-    file_content = data.get("file_content")   # legacy text fallback
+    file_content = data.get("file_content")
     file_name    = data.get("file_name")
-    file_bytes_b64 = data.get("file_bytes")   # base64-encoded file bytes
+    file_bytes_b64 = data.get("file_bytes")
     file_media_type = data.get("file_media_type", "application/pdf")
+    visual_identity = data.get("visual_identity")  # from UI panel
 
-    # Update the trackers!
+    if not brand_id:
+        return jsonify({"error": "brand_id is required"}), 400
+
+    # Update the trackers
     active_user_id = user_id
     active_brand_id = brand_id
 
-    if not message and not file_content and not file_bytes_b64:
+    if not message and not file_content and not file_bytes_b64 and not visual_identity:
         return jsonify({"error": "No message or file provided"}), 400
 
     try:
         from brand_onboarding_agent import BrandOnboardingAgent, upload_file_to_claude, delete_file_from_claude
+        from data_layer_vertexAI import update_brand_info
         import thread_manager
+
+        # ── Visual identity update (from UI panel — no chat turn needed) ─────
+        if message == "__visual_identity_update__" and visual_identity:
+            update_brand_info(brand_id, {
+                k: v for k, v in visual_identity.items() if v not in (None, "", [], {})
+            })
+            return jsonify({"response": "visual_identity_saved", "completion_pct": 0})
 
         agent = BrandOnboardingAgent()
         thread = thread_manager.load_thread(user_id, "brand_onboarding")
 
-        # Snapshot BEFORE run — fix the diff bug
+        if thread.get("brand_id") and thread.get("brand_id") != brand_id:
+            print(f"[Session] Brand changed from {thread['brand_id']} to {brand_id}. Clearing stale thread.")
+            thread["messages"] = []
+            thread["collected_fields"] = {}
+            thread["summary"] = ""
+            
+        # Always update brand_id to what the current request says
+        thread["brand_id"] = brand_id
+
         collected_before = dict(thread.get("collected_fields", {}))
 
-        # Handle Files API upload
         file_id = None
         if file_bytes_b64 and file_name:
             import base64
@@ -101,16 +124,15 @@ def chat():
             thread=thread,
             file_id=file_id,
             file_media_type=file_media_type if file_id else None,
-            file_content=file_content,   # legacy fallback
+            file_content=file_content,
             file_name=file_name,
         )
 
-        # Clean up file from Claude's storage after use
         if file_id:
             delete_file_from_claude(file_id)
 
         thread_manager.append_messages(thread, message or f"[file: {file_name}]", response)
-        thread_manager.save_thread(user_id, "brand_onboarding", thread)
+        thread_manager.save_thread(user_id, "brand_onboarding", thread, brand_id)
 
         collected_after = thread.get("collected_fields", {})
         completion_pct = agent._completion_percentage(collected_after)
@@ -125,7 +147,6 @@ def chat():
             if agent._is_section_complete(k, collected_after)
         ]
 
-        # Correct diff — compare snapshots, not references
         extracted_fields = [k for k in collected_after if k not in collected_before]
 
         return jsonify({

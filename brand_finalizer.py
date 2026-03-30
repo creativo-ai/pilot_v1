@@ -21,76 +21,64 @@ TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "brand_book_template.jso
 
 # Flat field → nested path mapping so collected flat fields populate the full template
 FIELD_MAP = {
-    # Metadata
-    "brand_name":                   ["metadata", "brand_name"],
-    "brand_id":                     ["metadata", "brand_id"],
-    "industry":                     ["metadata", "industry"],
+    # ── Metadata ──────────────────────────────────────────────────────────────
+    "brand_name":           ["metadata", "brand_name"],
+    "brand_id":             ["metadata", "brand_id"],
+    "notes":                ["metadata", "notes"],
 
-    # Brand Foundation
-    "mission":                      ["brand_foundation", "mission"],
-    "vision":                       ["brand_foundation", "vision"],
-    "purpose":                      ["brand_foundation", "purpose"],
-    "values":                       ["brand_foundation", "core_values"],
-    "core_values":                  ["brand_foundation", "core_values"],
-    "brand_promise":                ["brand_foundation", "brand_promise"],
-    "brand_story":                  ["brand_foundation", "brand_story", "origin_story"],
-    "origin_story":                 ["brand_foundation", "brand_story", "origin_story"],
-    "founder_story":                ["brand_foundation", "brand_story", "founder_story"],
-    "tagline":                      ["brand_foundation", "tagline"],
-    "slogan":                       ["brand_foundation", "slogan"],
-    "positioning":                  ["brand_foundation", "positioning_statement"],
-    "elevator_pitch":               ["brand_foundation", "value_proposition"],
-    "value_proposition":            ["brand_foundation", "value_proposition"],
-    "unique_selling_points":        ["brand_foundation", "unique_selling_points"],
+    # ── Brand Core ────────────────────────────────────────────────────────────
+    "vision":               ["brand_core", "vision"],
+    "mission":              ["brand_core", "mission"],
+    "emotion":              ["brand_core", "emotion"],
+    "competitor":           ["brand_core", "competitor"],
+    "competitors":          ["brand_core", "competitor"],       # alias
+    "domain":               ["brand_core", "domain"],
+    "usp_statement":        ["brand_core", "usp_statement"],
+    "unique_selling_points":["brand_core", "usp_statement"],   # alias
+    "name":                 ["brand_core", "name"],
+    "market_positioning":   ["brand_core", "market_positioning"],
+    "positioning":          ["brand_core", "market_positioning"],  # alias
+    "core_values":          ["brand_core", "core_values"],
+    "values":               ["brand_core", "core_values"],         # alias
 
-    # Brand Personality — use correct nested paths from template
-    "tone":                         ["brand_personality", "tone_of_voice", "primary_tone"],
-    "brand_voice":                  ["brand_personality", "brand_voice_description"],
-    "brand_archetype":              ["brand_personality", "archetype_primary"],
-    "personality_traits":           ["brand_personality", "personality_traits"],
-    "language_style":               ["brand_personality", "brand_human_character"],
-    "communication_style":          ["brand_personality", "brand_human_character"],
+    # ── Brand Voice ───────────────────────────────────────────────────────────
+    "tone_of_voice":        ["brand_voice", "tone_of_voice"],
+    "tone":                 ["brand_voice", "tone_of_voice"],       # alias
+    "words_to_avoid":       ["brand_voice", "words_to_avoid"],
+    "key_messages":         ["brand_voice", "key_messages"],
+    "taglines_and_slogans": ["brand_voice", "taglines_and_slogans"],
+    "tagline":              ["brand_voice", "taglines_and_slogans"],  # alias
+    "slogan":               ["brand_voice", "taglines_and_slogans"],  # alias
 
-    # Target Audience
-    "target_audience":              ["target_audience", "primary_audience", "description"],
-    "primary_audience_age":         ["target_audience", "primary_audience", "demographics", "age_range"],
-    "primary_audience_location":    ["target_audience", "primary_audience", "demographics", "location"],
-    "primary_audience_pain_points": ["target_audience", "primary_audience", "psychographics", "pain_points"],
+    # ── Target Audience ───────────────────────────────────────────────────────
+    "primary_audience":                 ["target_audience", "primary_audience"],
+    "target_audience":                  ["target_audience", "primary_audience"],  # alias
+    "demographics_gender":              ["target_audience", "demographics", "gender"],
+    "demographics_age":                 ["target_audience", "demographics", "age"],
+    "demographics_location":            ["target_audience", "demographics", "location"],
+    "demographics_income_level":        ["target_audience", "demographics", "income_level"],
+    "demographics_interests":           ["target_audience", "demographics", "interests"],
+    "demographics_pain_points_behaviors": ["target_audience", "demographics", "pain_points_behaviors"],
+    "demographics_communication_style": ["target_audience", "demographics", "communication_style"],
+    # Short aliases for the same fields
+    "gender":               ["target_audience", "demographics", "gender"],
+    "age":                  ["target_audience", "demographics", "age"],
+    "location":             ["target_audience", "demographics", "location"],
+    "income_level":         ["target_audience", "demographics", "income_level"],
+    "interests":            ["target_audience", "demographics", "interests"],
+    "pain_points_behaviors":["target_audience", "demographics", "pain_points_behaviors"],
+    "communication_style":  ["target_audience", "demographics", "communication_style"],
 
-    # Market Positioning
-    "competitors":                  ["market_positioning", "competitive_landscape", "direct_competitors"],
-    "competitive_advantages":       ["market_positioning", "competitive_landscape", "competitive_advantages"],
-    "pricing_strategy":             ["market_positioning", "pricing_strategy"],
-
-    # Brand Messaging
-    "core_messages":                ["brand_messaging", "core_messages"],
-    "key_benefits":                 ["brand_messaging", "key_benefits"],
-    "primary_goal":                 ["brand_messaging", "primary_goal"],
-    "elevator_pitch_short":         ["brand_messaging", "elevator_pitch_short"],
-    "elevator_pitch_long":          ["brand_messaging", "elevator_pitch_long"],
-
-    # Visual Identity
-    "primary_color":                ["visual_identity", "color_palette", "primary_colors"],
-    "secondary_color":              ["visual_identity", "color_palette", "secondary_colors"],
-
-    # Content Strategy
-    "content_pillars":              ["content_strategy", "content_pillars"],
-    "posting_frequency":            ["content_strategy", "posting_frequency"],
-    "hashtags":                     ["content_strategy", "hashtag_strategy"],
-
-    # Email Branding
-    "email_greeting":               ["email_branding", "email_greeting_style"],
-    "email_closing":                ["email_branding", "email_closing_style"],
-    "default_email_signature":      ["email_branding", "default_signature"],
-
-    # Product / Service
-    "flagship_product":             ["product_or_service", "flagship_product"],
-    "offerings":                    ["product_or_service", "offerings"],
-
-    # Future Vision
-    "short_term_goals":             ["future_vision", "short_term_goals"],
-    "long_term_goals":              ["future_vision", "long_term_goals"],
-    "expansion_plans":              ["future_vision", "expansion_plans"],
+    # ── Visual Identity ───────────────────────────────────────────────────────
+    "logo_usage_icon_only_version":   ["visual_identity", "logo_usage", "icon_only_version"],
+    "logo_usage_full_logo":           ["visual_identity", "logo_usage", "full_logo"],
+    "logo_usage_black_white_variations": ["visual_identity", "logo_usage", "black_white_variations"],
+    "font_for_headings":              ["visual_identity", "typography", "font_for_headings"],
+    "font_for_body_text":             ["visual_identity", "typography", "font_for_body_text"],
+    "primary_colors":                 ["visual_identity", "color_palette", "primary_colors"],
+    "primary_color":                  ["visual_identity", "color_palette", "primary_colors"],  # alias
+    "secondary_colors":               ["visual_identity", "color_palette", "secondary_colors"],
+    "secondary_color":                ["visual_identity", "color_palette", "secondary_colors"], # alias
 }
 
 def _set_nested(d: dict, path: list, value):
@@ -214,6 +202,9 @@ def _run_once():
 # ── Finalization logic ────────────────────────────────────────────────────────
 
 def _finalize_thread(thread: dict, user_id: str, brand_id: str):
+    if not brand_id:
+        print(f"[Finalizer] Skipping — brand_id is None for user {user_id}")
+        return
     collected_fields = thread.get("collected_fields", {})
     messages = thread.get("messages", [])
     import datetime
@@ -233,13 +224,20 @@ def _finalize_thread(thread: dict, user_id: str, brand_id: str):
             brand_book.setdefault("extra_fields", {})[flat_key] = value
 
     # Update metadata
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "") + "Z"
+
     brand_book.setdefault("metadata", {})
     brand_book["metadata"]["brand_id"] = brand_id
     brand_book["metadata"]["brand_name"] = (
         collected_fields.get("brand_name")
         or brand_book["metadata"].get("brand_name", "")
     )
-    brand_book["metadata"]["updated_at"] = str(datetime.date.today())
+    
+    # Set created_at only if it doesn't exist yet, always set updated_at
+    if not brand_book["metadata"].get("created_at"):
+        brand_book["metadata"]["created_at"] = now_iso
+    brand_book["metadata"]["updated_at"] = now_iso
+    
     brand_book["metadata"]["version"] = _get_next_brand_version(brand_id)
     brand_book["metadata"]["status"] = "active"
 
@@ -277,7 +275,6 @@ def _finalize_thread(thread: dict, user_id: str, brand_id: str):
     vector = embedding_model.get_embeddings([brand_context_summary])[0].values
     _upsert_to_vertex(chunk_id, vector)
     print("[Finalizer] Brand context saved to Vertex AI.")
-
 
 
 

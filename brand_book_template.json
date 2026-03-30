@@ -6,56 +6,50 @@
     "status": "draft",
     "created_at": "",
     "updated_at": "",
-    "created_by": "",
-    "approved_by": "",
     "notes": ""
   },
-    "brand_core": {
-      "vision": "",
-      "mission": "",
-      "emotion": "",
-      "competitor": [""],
-      "domain": "",
-      "usp_statement": "",
-      "name": "",
-      "market_positioning": "",
-      "core_values": [""]
+  "brand_core": {
+    "vision": "",
+    "mission": "",
+    "emotion": "",
+    "competitor": [],
+    "domain": "",
+    "usp_statement": "",
+    "name": "",
+    "market_positioning": "",
+    "core_values": []
+  },
+  "brand_voice": {
+    "tone_of_voice": "",
+    "words_to_avoid": [],
+    "key_messages": [],
+    "taglines_and_slogans": []
+  },
+  "target_audience": {
+    "primary_audience": "",
+    "demographics": {
+      "gender": "",
+      "age": "",
+      "location": "",
+      "income_level": "",
+      "interests": "",
+      "pain_points_behaviors": "",
+      "communication_style": ""
+    }
+  },
+  "visual_identity": {
+    "logo_usage": {
+      "icon_only_version": "",
+      "full_logo": "",
+      "black_white_variations": ""
     },
-    "brand_voice": {
-      "tone_of_voice": "",
-      "words_to_avoid": [""],
-      "key_messages": [""],
-      "taglines_and_slogans": [""]
+    "typography": {
+      "font_for_headings": "",
+      "font_for_body_text": ""
     },
-    "target_audience": {
-      "primary_audience": "",
-      "demographics": {
-        "gender": "",
-        "communication_style": "",
-        "income_level": "",
-        "location": "",
-        "pain_points_behaviors": "",
-        "interests": "",
-        "age": ""
-      }
-    },
-    "visual_identity": {
-      "logo_usage": {
-        "icon_only_version": "",
-        "full_logo": "",
-        "black_white_variations": ""
-      },
-      "typography": {
-        "font_for_headings": "",
-        "font_for_body_text": ""
-      },
-      "color_palette": {
-        "secondary_colors": [
-          ""
-        ],
-        "primary_colors": [
-          ""
-        ]
-      }
+    "color_palette": {
+      "primary_colors": [],
+      "secondary_colors": []
     }
   }
+}

@@ -3,742 +3,138 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Creativo — Brand Onboarding</title>
+<title>Creativo — Brand Onboarding Prototype</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-
   :root {
-    --bg: #f7f6f3;
-    --surface: #ffffff;
-    --surface2: #f2f0ec;
-    --border: rgba(0,0,0,0.08);
-    --border2: rgba(0,0,0,0.14);
-    --text: #1a1916;
-    --text2: #6b6860;
-    --text3: #9b9890;
-    --accent: #2a5cf6;
-    --accent-bg: #eef1fe;
-    --accent-text: #1a3db8;
-    --ai-bubble: #f2f0ec;
-    --user-bubble: #2a5cf6;
-    --user-text: #ffffff;
-    --progress-bg: #e8e6e2;
-    --progress-fill: #2a5cf6;
-    --tag-bg: #eef1fe;
-    --tag-text: #1a3db8;
-    --danger: #e24b4a;
-    --success: #1d9e75;
-    --radius: 12px;
-    --radius-sm: 8px;
+    --bg: #f7f6f3; --surface: #ffffff; --surface2: #f2f0ec;
+    --border: rgba(0,0,0,0.08); --border2: rgba(0,0,0,0.14);
+    --text: #1a1916; --text2: #6b6860; --text3: #9b9890;
+    --accent: #2a5cf6; --accent-bg: #eef1fe; --accent-text: #1a3db8;
+    --user-bubble: #2a5cf6; --user-text: #ffffff;
+    --radius: 12px; --radius-sm: 8px;
     --font: 'DM Sans', -apple-system, sans-serif;
-    --font-mono: 'DM Mono', monospace;
   }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  
+  header { background: var(--surface); border-bottom: 0.5px solid var(--border2); padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; z-index: 10; }
+  .logo { font-weight: 600; font-size: 15px; color: var(--text); }
+  .brand-pill { background: var(--accent-bg); color: var(--accent-text); font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 20px; }
 
-  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
-
-  body {
-    font-family: var(--font);
-    background: var(--bg);
-    color: var(--text);
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  /* ── Header ── */
-  header {
-    background: var(--surface);
-    border-bottom: 0.5px solid var(--border2);
-    padding: 0 24px;
-    height: 56px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-shrink: 0;
-    z-index: 10;
-  }
-
-  .logo {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-weight: 600;
-    font-size: 15px;
-    letter-spacing: -0.3px;
-    color: var(--text);
-  }
-
-  .logo-icon {
-    width: 28px; height: 28px;
-    background: var(--accent);
-    border-radius: 7px;
-    display: flex; align-items: center; justify-content: center;
-  }
-
-  .logo-icon svg { width: 14px; height: 14px; fill: white; }
-
-  .header-right {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .brand-pill {
-    background: var(--tag-bg);
-    color: var(--tag-text);
-    font-size: 12px;
-    font-weight: 500;
-    padding: 4px 10px;
-    border-radius: 20px;
-    border: 0.5px solid rgba(42,92,246,0.2);
-  }
-
-  .progress-wrap {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    color: var(--text2);
-  }
-
-  .progress-bar {
-    width: 80px; height: 4px;
-    background: var(--progress-bg);
-    border-radius: 2px;
-    overflow: hidden;
-  }
-
-  .progress-fill {
-    height: 100%;
-    background: var(--progress-fill);
-    border-radius: 2px;
-    transition: width 0.6s ease;
-  }
-
-  /* ── Layout ── */
-  .layout {
-    display: flex;
-    flex: 1;
-    overflow: hidden;
-  }
-
-  /* ── Sidebar ── */
-  .sidebar {
-    width: 240px;
-    background: var(--surface);
-    border-right: 0.5px solid var(--border2);
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
-    overflow-y: auto;
-    padding: 16px 0;
-  }
-
-  .sidebar-section {
-    padding: 0 16px;
-    margin-bottom: 20px;
-  }
-
-  .sidebar-label {
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.8px;
-    text-transform: uppercase;
-    color: var(--text3);
-    margin-bottom: 8px;
-    padding: 0 4px;
-  }
-
-  .section-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 8px;
-    border-radius: var(--radius-sm);
-    font-size: 13px;
-    color: var(--text2);
-    cursor: default;
-    transition: background 0.15s;
-  }
-
-  .section-item.active {
-    background: var(--accent-bg);
-    color: var(--accent-text);
-    font-weight: 500;
-  }
-
-  .section-item.done {
-    color: var(--success);
-  }
-
-  .section-dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--border2);
-    flex-shrink: 0;
-  }
-
-  .section-item.active .section-dot { background: var(--accent); }
-  .section-item.done .section-dot { background: var(--success); }
-
-  /* ── Chat area ── */
-  .chat-area {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    background: var(--bg);
-  }
-
-  .messages {
-    flex: 1;
-    overflow-y: auto;
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    scroll-behavior: smooth;
-  }
-
-  .messages::-webkit-scrollbar { width: 4px; }
-  .messages::-webkit-scrollbar-track { background: transparent; }
-  .messages::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
-
-  /* ── Message bubbles ── */
-  .msg-row {
-    display: flex;
-    gap: 10px;
-    align-items: flex-end;
-  }
-
+  .chat-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); max-width: 900px; margin: 0 auto; width: 100%; }
+  .messages { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; scroll-behavior: smooth; }
+  
+  .msg-row { display: flex; gap: 10px; align-items: flex-end; }
   .msg-row.user { flex-direction: row-reverse; }
-
-  .avatar {
-    width: 28px; height: 28px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 11px; font-weight: 600;
-    margin-bottom: 2px;
-  }
-
-  .avatar.ai {
-    background: var(--accent);
-    color: white;
-  }
-
-  .avatar.user {
-    background: var(--surface2);
-    color: var(--text2);
-    border: 0.5px solid var(--border2);
-  }
-
-  .bubble {
-    max-width: 68%;
-    padding: 12px 16px;
-    border-radius: var(--radius);
-    font-size: 14px;
-    line-height: 1.6;
-    position: relative;
-  }
-
-  .bubble.ai {
-    background: var(--surface);
-    color: var(--text);
-    border: 0.5px solid var(--border);
-    border-bottom-left-radius: 4px;
-  }
-
-  .bubble.user {
-    background: var(--user-bubble);
-    color: var(--user-text);
-    border-bottom-right-radius: 4px;
-  }
-
-  .bubble.ai strong { font-weight: 600; color: var(--text); }
-
-  .bubble-time {
-    font-size: 10px;
-    color: var(--text3);
-    margin-top: 4px;
-    text-align: right;
-  }
-
-  .msg-row.ai .bubble-time { text-align: left; padding-left: 38px; }
-  .msg-row.user .bubble-time { text-align: right; padding-right: 38px; }
-
-  /* ── File attachment in bubble ── */
-  .file-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: rgba(255,255,255,0.15);
-    border: 0.5px solid rgba(255,255,255,0.3);
-    border-radius: 6px;
-    padding: 4px 8px;
-    font-size: 12px;
-    margin-bottom: 6px;
-  }
-
-  .file-chip svg { width: 12px; height: 12px; fill: rgba(255,255,255,0.8); }
-
-  /* ── Typing indicator ── */
-  .typing {
-    display: flex;
-    gap: 4px;
-    padding: 14px 16px;
-    background: var(--surface);
-    border: 0.5px solid var(--border);
-    border-radius: var(--radius);
-    border-bottom-left-radius: 4px;
-    width: fit-content;
-  }
-
-  .typing span {
-    width: 6px; height: 6px;
-    background: var(--text3);
-    border-radius: 50%;
-    animation: bounce 1.2s ease infinite;
-  }
-
-  .typing span:nth-child(2) { animation-delay: 0.2s; }
-  .typing span:nth-child(3) { animation-delay: 0.4s; }
-
-  @keyframes bounce {
-    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-    30% { transform: translateY(-5px); opacity: 1; }
-  }
-
-  /* ── Extracted fields banner ── */
-  .fields-banner {
-    margin: 0 24px;
-    background: #eaf3de;
-    border: 0.5px solid #97c459;
-    border-radius: var(--radius-sm);
-    padding: 10px 14px;
-    font-size: 13px;
-    color: #3b6d11;
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    display: none;
-  }
-
-  .fields-banner.visible { display: flex; }
-  .fields-banner svg { width: 14px; height: 14px; fill: #639922; flex-shrink: 0; margin-top: 1px; }
-
-  /* ── Input area ── */
-  .input-area {
-    background: var(--surface);
-    border-top: 0.5px solid var(--border2);
-    padding: 16px 24px;
-    flex-shrink: 0;
-  }
-
-  .file-preview {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: var(--accent-bg);
-    border: 0.5px solid rgba(42,92,246,0.25);
-    border-radius: var(--radius-sm);
-    padding: 8px 12px;
-    margin-bottom: 10px;
-    font-size: 13px;
-    color: var(--accent-text);
-    display: none;
-  }
-
-  .file-preview.visible { display: flex; }
-  .file-preview svg { width: 14px; height: 14px; fill: var(--accent); flex-shrink: 0; }
-
-  .file-preview-name { flex: 1; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .file-preview-size { color: var(--text3); font-size: 12px; }
-
-  .file-remove {
-    background: none; border: none; cursor: pointer;
-    color: var(--text3); font-size: 16px; padding: 0 2px;
-    line-height: 1;
-  }
-
-  .file-remove:hover { color: var(--danger); }
-
-  .input-row {
-    display: flex;
-    gap: 8px;
-    align-items: flex-end;
-  }
-
-  .input-actions {
-    display: flex;
-    gap: 4px;
-    align-items: center;
-    flex-shrink: 0;
-  }
-
-  .icon-btn {
-    width: 36px; height: 36px;
-    border-radius: var(--radius-sm);
-    border: 0.5px solid var(--border2);
-    background: var(--surface2);
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer;
-    transition: all 0.15s;
-    color: var(--text2);
-  }
-
-  .icon-btn:hover {
-    background: var(--accent-bg);
-    border-color: rgba(42,92,246,0.3);
-    color: var(--accent);
-  }
-
-  .icon-btn svg { width: 15px; height: 15px; fill: currentColor; }
-
-  #file-input { display: none; }
-
-  textarea {
-    flex: 1;
-    border: 0.5px solid var(--border2);
-    border-radius: var(--radius-sm);
-    padding: 9px 14px;
-    font-family: var(--font);
-    font-size: 14px;
-    color: var(--text);
-    background: var(--surface);
-    resize: none;
-    outline: none;
-    min-height: 38px;
-    max-height: 120px;
-    line-height: 1.5;
-    transition: border-color 0.15s;
-  }
-
-  textarea:focus { border-color: var(--accent); }
-  textarea::placeholder { color: var(--text3); }
-
-  .send-btn {
-    width: 36px; height: 36px;
-    border-radius: var(--radius-sm);
-    border: none;
-    background: var(--accent);
-    color: white;
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: all 0.15s;
-  }
-
-  .send-btn:hover { background: #1e4de0; }
-  .send-btn:active { transform: scale(0.96); }
-  .send-btn:disabled { background: var(--progress-bg); cursor: not-allowed; }
-  .send-btn svg { width: 15px; height: 15px; fill: white; }
-
-  /* ── Welcome state ── */
-  .welcome {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    padding: 40px;
-    text-align: center;
-    color: var(--text2);
-  }
-
-  .welcome-icon {
-    width: 48px; height: 48px;
-    background: var(--accent-bg);
-    border-radius: 14px;
-    display: flex; align-items: center; justify-content: center;
-    margin-bottom: 4px;
-  }
-
-  .welcome-icon svg { width: 22px; height: 22px; fill: var(--accent); }
-  .welcome h2 { font-size: 18px; font-weight: 600; color: var(--text); }
-  .welcome p { font-size: 14px; max-width: 320px; line-height: 1.6; }
-
-  .quick-starts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: center;
-    margin-top: 8px;
-  }
-
-  .qs-btn {
-    background: var(--surface);
-    border: 0.5px solid var(--border2);
-    border-radius: 20px;
-    padding: 7px 14px;
-    font-size: 13px;
-    color: var(--text);
-    cursor: pointer;
-    font-family: var(--font);
-    transition: all 0.15s;
-  }
-
-  .qs-btn:hover {
-    background: var(--accent-bg);
-    border-color: rgba(42,92,246,0.3);
-    color: var(--accent-text);
-  }
-
-  /* ── Scrollbar ── */
-  .sidebar::-webkit-scrollbar { width: 3px; }
-  .sidebar::-webkit-scrollbar-track { background: transparent; }
-  .sidebar::-webkit-scrollbar-thumb { background: var(--border2); }
-
-  /* ── Markdown in bubbles ── */
+  .avatar { width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; }
+  .avatar.ai { background: var(--accent); color: white; }
+  .avatar.user { background: var(--surface2); color: var(--text2); border: 0.5px solid var(--border2); }
+  
+  .bubble { max-width: 75%; padding: 12px 16px; border-radius: var(--radius); font-size: 14px; line-height: 1.6; }
+  .bubble.ai { background: var(--surface); color: var(--text); border: 0.5px solid var(--border); border-bottom-left-radius: 4px; }
+  .bubble.user { background: var(--user-bubble); color: var(--user-text); border-bottom-right-radius: 4px; }
   .bubble.ai p { margin-bottom: 8px; }
   .bubble.ai p:last-child { margin-bottom: 0; }
-  .bubble.ai ul, .bubble.ai ol { padding-left: 18px; margin: 6px 0; }
-  .bubble.ai li { margin-bottom: 3px; }
-  .bubble.ai code { font-family: var(--font-mono); font-size: 12px; background: var(--surface2); padding: 1px 5px; border-radius: 4px; }
+  
+  /* Fields Banner */
+  .fields-banner { margin: 0 24px; background: #eaf3de; border: 0.5px solid #97c459; border-radius: var(--radius-sm); padding: 10px 14px; font-size: 13px; color: #3b6d11; display: none; align-items: flex-start; gap: 8px; }
+  .fields-banner.visible { display: flex; }
+
+  .input-area { background: var(--surface); border-top: 0.5px solid var(--border2); padding: 16px 24px; flex-shrink: 0; }
+  .input-row { display: flex; gap: 8px; align-items: flex-end; }
+  
+  textarea { flex: 1; border: 0.5px solid var(--border2); border-radius: var(--radius-sm); padding: 9px 14px; font-family: var(--font); font-size: 14px; resize: none; outline: none; min-height: 38px; max-height: 120px; }
+  textarea:focus { border-color: var(--accent); }
+  
+  .icon-btn, .send-btn { width: 36px; height: 36px; border-radius: var(--radius-sm); border: 0.5px solid var(--border2); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .icon-btn { background: var(--surface2); color: var(--text2); }
+  .send-btn { background: var(--accent); color: white; border: none; }
+  .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  
+  #file-input { display: none; }
+  .file-preview { display: none; align-items: center; gap: 8px; background: var(--accent-bg); padding: 8px 12px; border-radius: var(--radius-sm); margin-bottom: 10px; font-size: 13px; color: var(--accent-text); }
+  .file-preview.visible { display: flex; }
 </style>
 </head>
 <body>
 
 <header>
-  <div class="logo">
-    <div class="logo-icon">
-      <svg viewBox="0 0 16 16"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z"/></svg>
-    </div>
-    Creativo
-  </div>
+  <div class="logo">Creativo Prototype</div>
+  <div class="brand-pill" id="brand-label">Brand ID: test6</div>
 </header>
 
-<div class="layout">
-  
+<div class="chat-area">
+  <div class="fields-banner" id="fields-banner"><span id="fields-banner-text"></span></div>
+  <div class="messages" id="messages"></div>
 
-  <div class="chat-area">
-    <div class="fields-banner" id="fields-banner">
-      <svg viewBox="0 0 16 16"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm.75 3.5v4.25l2.5 1.5-.75 1.25-3-1.75V4.5h1.25z"/></svg>
-      <span id="fields-banner-text"></span>
+  <div class="input-area">
+    <div class="file-preview" id="file-preview">
+      📄 <span id="file-name"></span>
+      <button onclick="removeFile()" style="background:none;border:none;cursor:pointer;margin-left:auto;">❌</button>
     </div>
-
-    <div class="messages" id="messages">
-      <div class="welcome" id="welcome-screen">
-        <div class="welcome-icon">
-          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg>
-        </div>
-        <h2>Brand Onboarding</h2>
-        <p>Let's build your client's brand book together. Start a conversation or upload a brand document to get going.</p>
-        <div class="quick-starts">
-        </div>
-      </div>
-    </div>
-
-    <div class="input-area">
-      <div class="file-preview" id="file-preview">
-        <svg viewBox="0 0 16 16"><path d="M9 1H4a1 1 0 00-1 1v12a1 1 0 001 1h8a1 1 0 001-1V5L9 1zm0 1.5L12.5 5H9V2.5zM4 14V2h4v4h4v8H4z"/></svg>
-        <span class="file-preview-name" id="file-name"></span>
-        <span class="file-preview-size" id="file-size"></span>
-        <button class="file-remove" onclick="removeFile()" title="Remove file">×</button>
-      </div>
-      <div class="input-row">
-        <div class="input-actions">
-          <label class="icon-btn" for="file-input" title="Attach file (PDF, DOCX, TXT)">
-            <svg viewBox="0 0 16 16"><path d="M14 7l-5-5H3a1 1 0 00-1 1v10a1 1 0 001 1h10a1 1 0 001-1V7zm-5-3.5L11.5 6H9V3.5zM3 13V3h5v4h4v6H3z"/></svg>
-          </label>
-          <input type="file" id="file-input" accept=".pdf,.docx,.doc,.txt,.md" onchange="handleFile(event)">
-        </div>
-        <textarea
-          id="msg-input"
-          placeholder="Message Lumio..."
-          rows="1"
-          onkeydown="handleKey(event)"
-          oninput="autoResize(this)"
-        ></textarea>
-        <button class="send-btn" id="send-btn" onclick="sendMessage()">
-          <svg viewBox="0 0 16 16"><path d="M14.5 8l-12-6 2.5 6-2.5 6z"/></svg>
-        </button>
-      </div>
+    <div class="input-row">
+      <label class="icon-btn" for="file-input">📎</label>
+      <input type="file" id="file-input" accept=".pdf,.docx,.txt" onchange="handleFile(event)">
+      
+      <textarea id="msg-input" placeholder="Message Lumio..." rows="1" onkeydown="handleKey(event)"></textarea>
+      
+      <button class="send-btn" id="send-btn" onclick="sendMessage()">➤</button>
     </div>
   </div>
 </div>
 
 <script>
-const USER_ID = "marmar";
-const BRAND_ID = "test4";
-const API_URL = "http://localhost:8001/chat";
+// CHANGE THIS TO TEST DIFFERENT BRANDS (e.g. test5, test6)
+const USER_ID  = "marmar";
+const BRAND_ID = "test6";   
+const API_URL  = "http://localhost:8001/chat";
 
-const SECTIONS = [
-  "Brand Core",
-  "Brand Voice",
-  "Target Audience",
-  "Visual Identity"
-];
+document.getElementById("brand-label").textContent = `Brand ID: ${BRAND_ID}`;
 
 let pendingFile = null;
 let pendingFileText = null;
 let conversationHistory = [];
-let currentBrandName = "";
-let completionPct = 0;
-let activeSectionIdx = 0;
-let doneSections = new Set();
 
-function initSections() {
-  const list = document.getElementById("sections-list");
-  list.innerHTML = SECTIONS.map((s, i) => `
-    <div class="section-item" id="sec-${i}">
-      <div class="section-dot"></div>
-      <span>${s}</span>
-    </div>
-  `).join("");
-}
-
-function updateSections(active, done) {
-  // Elements removed from UI, do nothing
-}
-
-function updateProgress(pct, brandName) {
-  if (brandName) {
-    const brandLabel = document.getElementById("brand-label");
-    if (brandLabel) brandLabel.textContent = brandName;
-    currentBrandName = brandName;
-  }
-  // Progress bar elements removed from UI, so we skip updating them
-}
-
-function formatTime() {
-  return new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
-}
-
-function renderMarkdown(text) {
-  return text
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.+?)\*/g, "<em>$1</em>")
-    .replace(/`(.+?)`/g, "<code>$1</code>")
-    .replace(/^- (.+)/gm, "<li>$1</li>")
-    .replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`)
-    .replace(/\n\n/g, "</p><p>")
-    .replace(/^(?!<[uol])(.+)/gm, m => m.startsWith("<") ? m : m)
-    .replace(/\n/g, "<br>");
-}
-
-function addMessage(role, text, fileInfo = null) {
-  const welcome = document.getElementById("welcome-screen");
-  if (welcome) welcome.remove();
-
+function addMessage(role, text) {
   const msgs = document.getElementById("messages");
-  const isUser = role === "user";
-  const initials = isUser ? "U" : "AI";
-  const time = formatTime();
-
-  const fileChip = fileInfo ? `
-    <div class="file-chip">
-      <svg viewBox="0 0 16 16"><path d="M9 1H4a1 1 0 00-1 1v12a1 1 0 001 1h8a1 1 0 001-1V5L9 1zm0 1.5L12.5 5H9V2.5z"/></svg>
-      ${fileInfo}
-    </div><br>` : "";
-
-  const content = isUser
-    ? fileChip + escapeHtml(text)
-    : renderMarkdown(text);
-
   const row = document.createElement("div");
   row.className = `msg-row ${role}`;
+  const content = role === "user" ? escapeHtml(text) : renderMarkdown(text);
   row.innerHTML = `
-    <div class="avatar ${role}">${initials}</div>
-    <div>
-      <div class="bubble ${role}">${content}</div>
-    </div>
-  `;
-
-  msgs.appendChild(row);
-
-  const timeEl = document.createElement("div");
-  timeEl.className = "bubble-time";
-  timeEl.textContent = time;
-  msgs.appendChild(timeEl);
-
-  msgs.scrollTop = msgs.scrollHeight;
-  return row;
-}
-
-function showTyping() {
-  const welcome = document.getElementById("welcome-screen");
-  if (welcome) welcome.remove();
-
-  const msgs = document.getElementById("messages");
-  const row = document.createElement("div");
-  row.className = "msg-row ai";
-  row.id = "typing-row";
-  row.innerHTML = `
-    <div class="avatar ai">AI</div>
-    <div class="typing"><span></span><span></span><span></span></div>
+    <div class="avatar ${role}">${role === "user" ? "U" : "AI"}</div>
+    <div class="bubble ${role}">${content}</div>
   `;
   msgs.appendChild(row);
   msgs.scrollTop = msgs.scrollHeight;
 }
 
-function hideTyping() {
-  const el = document.getElementById("typing-row");
-  if (el) el.remove();
-}
-
-function escapeHtml(s) {
-  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-}
+function escapeHtml(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function renderMarkdown(t) { return t.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\n/g, "<br>"); }
 
 function showFieldsBanner(fields) {
   const banner = document.getElementById("fields-banner");
-  const text = document.getElementById("fields-banner-text");
-  text.textContent = `Extracted from file: ${fields.join(", ")}`;
+  document.getElementById("fields-banner-text").textContent = `Extracted fields: ${fields.join(", ")}`;
   banner.classList.add("visible");
-  setTimeout(() => banner.classList.remove("visible"), 6000);
-}
-
-function autoResize(el) {
-  el.style.height = "auto";
-  el.style.height = Math.min(el.scrollHeight, 120) + "px";
+  setTimeout(() => banner.classList.remove("visible"), 5000);
 }
 
 function handleKey(e) {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    sendMessage();
-  }
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 }
 
 async function handleFile(event) {
   const file = event.target.files[0];
   if (!file) return;
-
-  const size = file.size > 1024*1024
-    ? (file.size / (1024*1024)).toFixed(1) + " MB"
-    : (file.size / 1024).toFixed(0) + " KB";
-
   document.getElementById("file-name").textContent = file.name;
-  document.getElementById("file-size").textContent = size;
   document.getElementById("file-preview").classList.add("visible");
-
   pendingFile = file.name;
-
-  if (file.name.endsWith(".txt") || file.name.endsWith(".md")) {
-    pendingFileText = await file.text();
-  } else if (file.name.endsWith(".pdf")) {
-    pendingFileText = `[PDF file: ${file.name}]`;
-  } else if (file.name.endsWith(".docx") || file.name.endsWith(".doc")) {
-    pendingFileText = `[DOCX file: ${file.name}]`;
-  } else {
-    pendingFileText = `[File: ${file.name}]`;
-  }
-
+  pendingFileText = file.name.endsWith(".txt") ? await file.text() : `[File: ${file.name}]`;
   event.target.value = "";
 }
 
 function removeFile() {
-  pendingFile = null;
-  pendingFileText = null;
+  pendingFile = null; pendingFileText = null;
   document.getElementById("file-preview").classList.remove("visible");
-}
-
-function quickStart(text) {
-  document.getElementById("msg-input").value = text;
-  sendMessage();
 }
 
 async function sendMessage() {
@@ -746,72 +142,33 @@ async function sendMessage() {
   const text = input.value.trim();
   if (!text && !pendingFile) return;
 
-  const btn = document.getElementById("send-btn");
-  btn.disabled = true;
-  input.disabled = true;
-
   const msgText = text || `Uploaded: ${pendingFile}`;
-  addMessage("user", msgText, pendingFile);
+  addMessage("user", msgText);
   input.value = "";
-  input.style.height = "auto";
-
   conversationHistory.push({ role: "user", content: msgText });
 
   const payload = {
-    user_id: USER_ID,
-    brand_id: BRAND_ID,
-    message: msgText,
-    history: conversationHistory.slice(-20),
-    file_content: pendingFileText,
-    file_name: pendingFile,
+    user_id: USER_ID, brand_id: BRAND_ID, message: msgText,
+    history: conversationHistory.slice(-20), file_content: pendingFileText, file_name: pendingFile,
   };
 
   if (pendingFile) removeFile();
 
-  showTyping();
-
   try {
     const res = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
     });
-
-    hideTyping();
-
-    if (!res.ok) throw new Error(`Server error: ${res.status}`);
-
     const data = await res.json();
-    const reply = data.response || "Sorry, I couldn't respond.";
-
-    addMessage("ai", reply);
-    conversationHistory.push({ role: "assistant", content: reply });
-
+    addMessage("ai", data.response || "Error responding.");
+    conversationHistory.push({ role: "assistant", content: data.response });
+    
     if (data.extracted_fields && data.extracted_fields.length > 0) {
       showFieldsBanner(data.extracted_fields);
     }
-    if (data.completion_pct !== undefined) {
-      updateProgress(data.completion_pct, data.brand_name);
-    }
-    if (data.active_section !== undefined) {
-      activeSectionIdx = data.active_section;
-      doneSections = new Set(data.done_sections || []);
-      updateSections(activeSectionIdx, doneSections);
-    }
-
   } catch (err) {
-    hideTyping();
-    addMessage("ai", "Connection error — make sure the server is running on localhost:8001.");
-    console.error(err);
+    addMessage("ai", "Connection error.");
   }
-
-  btn.disabled = false;
-  input.disabled = false;
-  input.focus();
 }
-
-initSections();
-updateSections(0, new Set());
 </script>
 </body>
 </html>
