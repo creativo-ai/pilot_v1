@@ -233,10 +233,9 @@ def _finalize_thread(thread: dict, user_id: str, brand_id: str):
         or brand_book["metadata"].get("brand_name", "")
     )
     
-    # Set created_at only if it doesn't exist yet, always set updated_at
+    # Set created_at only if it doesn't exist yet
     if not brand_book["metadata"].get("created_at"):
         brand_book["metadata"]["created_at"] = now_iso
-    brand_book["metadata"]["updated_at"] = now_iso
     
     brand_book["metadata"]["version"] = _get_next_brand_version(brand_id)
     brand_book["metadata"]["status"] = "active"
