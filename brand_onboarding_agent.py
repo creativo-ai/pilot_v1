@@ -20,7 +20,6 @@ ONBOARDING_SECTIONS = [
     ("target_audience", "Target Audience",  "primary audience, demographics"),
 ]
 
-# Fields intentionally excluded from chat — collected via UI pickers instead
 VISUAL_FIELDS_SKIP = {
     "font_for_headings", "font_for_body_text",
     "primary_colors", "secondary_colors",
@@ -47,27 +46,22 @@ You are NOT a strategist — your role ends once the brand book essentials are c
 STRICT RULE: Look at the Missing Fields list above. Your ONLY goal is to ask questions to fill those specific gaps. NEVER ask a question about a topic that is not on that list.
 
 ## Handling "I don't know" or Confusion
-STRICT RULE: If the user says they don't know the answer or don't understand what a term means (e.g., "What are key messages?"), you MUST:
+STRICT RULE: If the user says they don't know the answer or don't understand what a term means, you MUST:
 1. Briefly and simply explain what the concept means in plain English.
-2. Provide 2 or 3 tailored examples based on their specific industry or what you already know about their brand to inspire them.
+2. Provide 2 or 3 tailored examples based on their specific industry to inspire them.
 3. Ask if any of those examples resonate with them.
 
 ## What you do NOT ask about
 STRICT RULE: DO NOT ask about fonts, colors, hex codes, or logos in the chat. 
 
 ## Returning clients
-If the brand book already has content, open warmly:
-- Greet them by brand name if available.
-- Briefly highlight what's already documented (2–3 things, not a list) to show you remember them.
-- Invite them to continue with a specific next gap. Do not start from scratch.
+If the brand book already has content, open warmly, briefly highlight 2-3 things already documented to show you remember them, and invite them to continue with the next gap.
 
 ## Handling File Uploads
-STRICT RULE: If the user uploads a file, you MUST do the following in your reply:
-1. Summarize the key brand information you successfully gathered from the file in a brief, readable bulleted list.
-2. End your reply by asking a specific question to fill in the next missing gap to continue the conversation.
+STRICT RULE: If the user uploads a file, you MUST summarize the key brand information you successfully gathered in a brief bulleted list, and end your reply by asking a specific question to fill the next missing gap.
 
 ## Completion & handoff
-When all conversational sections are covered (brand basics, core, voice, audience), wrap up warmly and introduce Lucy.
+When all conversational sections are covered, wrap up warmly and introduce Lucy.
 Say something exactly like: "That wraps up everything I need from you! 🎉 From here, Lucy — our brand strategist — will take over. I am just here for onboarding, but she will use everything you've shared to shape your strategy and guide your brand forward."
 Do NOT continue asking questions after this message.
 
@@ -81,53 +75,6 @@ Do NOT continue asking questions after this message.
 {routing_context}
 """
 
-# ── Extraction tool — Schema for Gemini ───────────────────────────────────────
-
-def _build_extract_tool() -> dict:
-    """
-    Build the extraction tool schema dynamically from FIELD_MAP.
-    """
-    from brand_finalizer import FIELD_MAP
-    import json as _json
-
-    _template = _json.load(open(TEMPLATE_PATH))
-
-    def _get_template_default(path: list):
-        node = _template
-        for key in path:
-            if isinstance(node, dict):
-                node = node.get(key)
-            else:
-                return None
-            if node is None:
-                return None
-        return node
-
-    properties = {}
-    for flat_key, path in FIELD_MAP.items():
-        default = _get_template_default(path)
-        if isinstance(default, list):
-            properties[flat_key] = {"type": "array", "items": {"type": "string"}}
-        else:
-            properties[flat_key] = {"type": "string"}
-
-    return {
-        "name": "save_brand_fields",
-        "description": (
-            "Extract all potential brand fields based on the user's explicitly stated facts or uploaded files. "
-            "Extract direct values and clear logical implications, but DO NOT guess, infer wildly, or hallucinate information just to fill fields. "
-            "Leave unknown fields null."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": properties,
-            "required": [],
-        },
-    }
-
-EXTRACT_TOOL = _build_extract_tool()
-
-
 class BrandOnboardingAgent(BaseAgent):
     name = "brand_onboarding"
     domain = (
@@ -137,7 +84,6 @@ class BrandOnboardingAgent(BaseAgent):
     )
 
     def _get_missing_fields(self, unified_state: dict) -> str:
-        # UPDATED: Now requires all conversational fields to prevent early handoff
         required = {
             "metadata":        ["brand_name"],
             "brand_core":      ["vision", "mission", "emotion", "competitor", "usp_statement", "market_positioning", "core_values"],
@@ -150,6 +96,7 @@ class BrandOnboardingAgent(BaseAgent):
                 if unified_state.get(f) in (None, "", [], {}):
                     missing.append(f.replace("_", " ").title())
         return ", ".join(missing) if missing else "None! Ready for handoff."
+
 
     def run(
         self,
@@ -178,7 +125,6 @@ class BrandOnboardingAgent(BaseAgent):
         # ── 2. Create Unified State ───────────────────────────────────────────
         unified_state = _get_unified_flat_state(saved_brand, collected)
         
-        # Format it cleanly for Claude to read
         brand_book_txt = "\n".join(
             f"{k.replace('_', ' ').title()}: {', '.join(v) if isinstance(v, list) else v}"
             for k, v in unified_state.items()
@@ -269,24 +215,42 @@ class BrandOnboardingAgent(BaseAgent):
         try:
             from llm_client import gemini_generate
             import json as _json
-            from brand_finalizer import FIELD_MAP
             
-            extractable_keys = list(FIELD_MAP.keys())
+            # STRICT KEYS ONLY - No aliases allowed to confuse the progress checker
+            exact_keys = [
+                "brand_name", "vision", "mission", "emotion", "competitor", "usp_statement",
+                "market_positioning", "core_values", "tone_of_voice", "words_to_avoid",
+                "key_messages", "taglines_and_slogans", "primary_audience", "demographics_age",
+                "demographics_location", "demographics_pain_points_behaviors",
+                "demographics_communication_style", "font_for_headings", "font_for_body_text",
+                "primary_colors", "secondary_colors", "logo_usage_icon_only_version",
+                "logo_usage_full_logo", "logo_usage_black_white_variations"
+            ]
             
-            gemini_system = (
-                "You are a data extractor. Extract brand information from the provided exchange. "
-                "Map to these keys ONLY: " + ", ".join(extractable_keys) + ". "
-                "Return ONLY valid JSON. If nothing brand-related was mentioned, return {}. "
-                "Do not guess or hallucinate."
-            )
+            gemini_system = f"""You are a highly accurate data extractor for a brand book.
+            Analyze the conversation history provided and extract brand information into a JSON object.
+
+            CRITICAL RULES:
+            1. ONLY extract information explicitly stated by the USER, or explicitly CONFIRMED by the user (e.g., if AI suggests "Cheap" and User says "Yes").
+            2. DO NOT extract AI examples or suggestions if the user has not confirmed them.
+            3. Do NOT guess, infer, or hallucinate fields (e.g., do not invent an emotion just because you know the brand name).
+            4. Use EXACTLY these JSON keys and no others: {', '.join(exact_keys)}.
+            5. Return ONLY valid JSON. If nothing new/relevant was established, return {{}}.
+            """
             
-            full_user_context = user_input
-            if file_content:
-                full_user_context += f"\n\n[File Content]: {file_content[:5000]}"
-                
-            exchange = f"User/File context: {full_user_context}\n\nAgent response: {reply}"
+            # BUILD MULTI-TURN CONTEXT (So Gemini knows what "Yes" means)
+            recent_history = messages[-4:] if len(messages) >= 4 else messages
+            exchange_text = ""
+            for m in recent_history:
+                role = "AI" if m["role"] == "assistant" else "USER"
+                content = m["content"]
+                if isinstance(content, list):
+                    content = " ".join([b.get("text", "") for b in content if b.get("type") == "text"])
+                exchange_text += f"{role}: {content}\n"
             
-            raw_json = gemini_generate(prompt=exchange, system=gemini_system)
+            exchange_text += f"AI: {reply}\n"
+            
+            raw_json = gemini_generate(prompt=exchange_text, system=gemini_system)
             
             if raw_json:
                 extracted = _json.loads(raw_json)
@@ -319,7 +283,6 @@ class BrandOnboardingAgent(BaseAgent):
         return None, None, None
 
     def _is_section_complete(self, section_key: str, collected: dict) -> bool:
-        # MUST MATCH the list in _get_missing_fields
         section_fields = {
             "metadata":        ["brand_name"],
             "brand_core":      ["vision", "mission", "emotion", "competitor", "usp_statement", "market_positioning", "core_values"],
